@@ -1,0 +1,48 @@
+{
+  "$schema": "https://turbo.build/schema.json",
+  "globalEnv": [
+    "DATABASE_URL",
+    "DIRECT_URL",
+    "REDIS_URL",
+    "NEXTAUTH_SECRET",
+    "NEXTAUTH_URL",
+    "STRIPE_SECRET_KEY",
+    "STRIPE_WEBHOOK_SECRET",
+    "TWILIO_ACCOUNT_SID",
+    "TWILIO_AUTH_TOKEN",
+    "TWILIO_VERIFY_SERVICE_SID",
+    "LINKEDIN_CLIENT_ID",
+    "LINKEDIN_CLIENT_SECRET",
+    "ENCRYPTION_SECRET",
+    "EMBEDDING_ENGINE",
+    "EMBEDDING_DIMS",
+    "TELEGRAM_BOT_TOKEN",
+    "RESEND_API_KEY",
+    "ADMIN_EMAIL",
+    "NODE_ENV"
+  ],
+  "tasks": {
+    "build": {
+      "dependsOn": ["^build"],
+      "outputs": [".next/**", "dist/**", "!.next/cache/**"]
+    },
+    "dev": {
+      "cache": false,
+      "persistent": true
+    },
+    "lint": {
+      "outputs": []
+    },
+    "test": {
+      "outputs": ["coverage/**"],
+      "cache": false
+    },
+    "type-check": {
+      "outputs": []
+    },
+    "db:generate": {
+      "cache": false,
+      "outputs": ["node_modules/.prisma/**"]
+    }
+  }
+}

@@ -1,0 +1,503 @@
+datasource db {
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  directUrl  = env("DIRECT_URL")
+  extensions = [pgvector(map: "vector"), pgcrypto(map: "pgcrypto")]
+}
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
+}
+
+// ═══════════════════════════════════════════════════════════
+//  ENUMS
+// ═══════════════════════════════════════════════════════════
+
+enum UserRole {
+  USER
+  ADMIN
+}
+
+enum WorkMode {
+  REMOTE
+  HYBRID
+  ON_SITE
+}
+
+enum ApplicationStatus {
+  DISCOVERED
+  APPLIED
+  INTERVIEWING
+  OFFER_RECEIVED
+  REJECTED
+  ARCHIVED
+}
+
+enum EmbeddingEngine {
+  LOCAL_MINILM   // 384 dims
+  OPENAI_SMALL   // 1536 dims
+}
+
+enum SubscriptionStatus {
+  TRIALING
+  ACTIVE
+  PAST_DUE
+  CANCELLED
+  INCOMPLETE
+}
+
+enum BillingInterval {
+  WEEKLY
+  MONTHLY
+  YEARLY
+}
+
+enum CreditTransactionType {
+  TRIAL_GRANT
+  PLAN_GRANT
+  TOPUP_PURCHASE
+  FEATURE_DEDUCT
+  ADMIN_GRANT
+  REFUND
+}
+
+enum OptimizationStatus {
+  QUEUED
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+enum ScraperAdapterType {
+  GREENHOUSE
+  LEVER
+  WORKDAY
+  RSS_ATOM
+  CUSTOM_PLUGIN
+}
+
+// ═══════════════════════════════════════════════════════════
+//  MULTI-TENANCY
+// ═══════════════════════════════════════════════════════════
+
+model Workspace {
+  id          String            @id @default(cuid())
+  name        String
+  slug        String            @unique
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+  members     WorkspaceMember[]
+  scrapers    ScraperConfig[]
+  jobMatches  JobMatch[]
+
+  @@map("workspaces")
+}
+
+model WorkspaceMember {
+  id          String    @id @default(cuid())
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  userId      String
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role        String    @default("member")
+  joinedAt    DateTime  @default(now())
+
+  @@unique([workspaceId, userId])
+  @@map("workspace_members")
+}
+
+// ═══════════════════════════════════════════════════════════
+//  USERS & IDENTITY
+// ═══════════════════════════════════════════════════════════
+
+model User {
+  id                String            @id @default(cuid())
+  email             String            @unique
+  passwordHash      String?
+  role              UserRole          @default(USER)
+
+  // Identity lock — anti-abuse re-registration
+  phoneNumber       String?           @unique  // E.164 format
+  phoneVerified     Boolean           @default(false)
+  linkedinId        String?           @unique  // OAuth sub claim (permanent)
+  linkedinProfileUrl String?
+  linkedinName      String?
+  identityLockedAt  DateTime?         // trial activates when all 3 verified
+
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+
+  // Relations
+  workspaces        WorkspaceMember[]
+  profile           UserProfile?
+  subscription      Subscription?
+  matches           JobMatch[]
+  notifications     NotificationLog[]
+  creditTransactions CreditTransaction[]
+  coverLetters      CoverLetter[]
+  optimizationRuns  ResumeOptimizationRun[]
+  skillsGapReports  SkillsGapReport[]
+
+  @@map("users")
+}
+
+model UserProfile {
+  id               String          @id @default(cuid())
+  userId           String          @unique
+  user             User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  fullName         String
+  headline         String?
+  rawResumeText    String?         @db.Text
+  parsedSkills     String[]        @default([])
+  targetTitles     String[]        @default([])
+  excludedTerms    String[]        @default([])
+  minimumSalary    Int?
+  preferredMode    WorkMode        @default(REMOTE)
+  embeddingEngine  EmbeddingEngine @default(LOCAL_MINILM)
+
+  // Two vector columns — only one populated per deployment config
+  // LOCAL_MINILM  → profileVector384
+  // OPENAI_SMALL  → profileVector1536
+  // Switching engine requires re-embedding migration
+  profileVector384   Unsupported("vector(384)")?
+  profileVector1536  Unsupported("vector(1536)")?
+
+  // AI feature settings
+  // aiApiKey stored AES-256 encrypted via ENCRYPTION_SECRET
+  aiApiKey         String?         // encrypted
+  aiProvider       String?         // "openai" | "anthropic"
+  creditBalance    Int             @default(50)
+  creditsLifetime  Int             @default(50)
+
+  // Notification preferences
+  telegramChatId   String?
+  emailDigest      String          @default("daily") // "instant" | "daily" | "weekly" | "none"
+
+  updatedAt        DateTime        @updatedAt
+
+  @@map("user_profiles")
+}
+
+// ═══════════════════════════════════════════════════════════
+//  IDENTITY FRAUD PREVENTION
+// ═══════════════════════════════════════════════════════════
+
+model BlockedIdentity {
+  id          String    @id @default(cuid())
+  emailHash   String?   @unique  // SHA-256(lowercase email)
+  phoneHash   String?   @unique  // SHA-256(E.164 phone)
+  linkedinId  String?   @unique  // Raw LinkedIn sub claim
+  reason      String    // "trial_abuse" | "payment_fraud" | "manual_ban"
+  blockedBy   String?   // admin userId if manual ban
+  createdAt   DateTime  @default(now())
+
+  @@map("blocked_identities")
+}
+
+model OtpAttempt {
+  id          String    @id @default(cuid())
+  phoneNumber String    @unique
+  attempts    Int       @default(0)
+  windowStart DateTime  @default(now())
+  lastAttempt DateTime  @default(now())
+
+  @@map("otp_attempts")
+}
+
+// ═══════════════════════════════════════════════════════════
+//  SUBSCRIPTIONS & BILLING
+// ═══════════════════════════════════════════════════════════
+
+model Plan {
+  id            String          @id @default(cuid())
+  name          String          // "Weekly" | "Monthly" | "Yearly"
+  stripePriceId String          @unique
+  interval      BillingInterval
+  amountCents   Int             // 499 / 1499 / 9900
+  currency      String          @default("usd")
+  creditsPerCycle Int           @default(0) // 30 / 150 / 2500
+  isActive      Boolean         @default(true)
+  subscriptions Subscription[]
+
+  @@map("plans")
+}
+
+model Subscription {
+  id                    String             @id @default(cuid())
+  userId                String             @unique
+  user                  User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  planId                String?
+  plan                  Plan?              @relation(fields: [planId], references: [id])
+  stripeCustomerId      String             @unique
+  stripeSubscriptionId  String?            @unique
+  status                SubscriptionStatus @default(TRIALING)
+  trialEnd              DateTime?
+  currentPeriodStart    DateTime?
+  currentPeriodEnd      DateTime?
+  cancelAtPeriodEnd     Boolean            @default(false)
+  paymentFailedAt       DateTime?
+  createdAt             DateTime           @default(now())
+  updatedAt             DateTime           @updatedAt
+
+  @@map("subscriptions")
+}
+
+model CreditPack {
+  id            String   @id @default(cuid())
+  name          String   // "Starter Pack"
+  stripePriceId String   @unique
+  credits       Int
+  amountCents   Int
+  currency      String   @default("usd")
+  isActive      Boolean  @default(true)
+
+  @@map("credit_packs")
+}
+
+model CreditTransaction {
+  id          String                @id @default(cuid())
+  userId      String
+  user        User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type        CreditTransactionType
+  amount      Int                   // positive = credit, negative = debit
+  balance     Int                   // running balance after transaction
+  description String
+  metadata    Json?
+  createdAt   DateTime              @default(now())
+
+  @@index([userId, createdAt])
+  @@map("credit_transactions")
+}
+
+// ═══════════════════════════════════════════════════════════
+//  SCRAPER CONFIGURATION
+// ═══════════════════════════════════════════════════════════
+
+model ScraperConfig {
+  id             String             @id @default(cuid())
+  workspaceId    String
+  workspace      Workspace          @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  adapterType    ScraperAdapterType
+  label          String
+  sourceUrl      String
+  cronSchedule   String             @default("0 */4 * * *")
+  requestsPerMin Int                @default(10)
+  delayMs        Int                @default(1000)
+  maxRetries     Int                @default(3)
+  enabled        Boolean            @default(true)
+  lastRunAt      DateTime?
+  lastRunStatus  String?            // "success" | "failed" | "running"
+  lastRunError   String?
+  jobsIngested   Int                @default(0)
+  consecutiveFails Int              @default(0)
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+
+  @@index([workspaceId, enabled])
+  @@map("scraper_configs")
+}
+
+// ═══════════════════════════════════════════════════════════
+//  JOB LISTINGS
+// ═══════════════════════════════════════════════════════════
+
+model JobListing {
+  id              String    @id @default(cuid())
+  contentHash     String    @unique   // SHA-256(company+normalizedTitle+desc)
+  companyName     String
+  jobTitle        String
+  locationRaw     String
+  workMode        WorkMode  @default(REMOTE)
+  baseSalaryMin   Int?
+  baseSalaryMax   Int?
+  currency        String?   @default("USD")
+  applyUrl        String
+  sourcePortal    String
+
+  descriptionRaw  String    @db.Text
+
+  // Populated based on deployment EMBEDDING_ENGINE config
+  listingVector384   Unsupported("vector(384)")?
+  listingVector1536  Unsupported("vector(1536)")?
+
+  // Admin moderation
+  isFlagged       Boolean   @default(false)
+  flagReason      String?   // "spam" | "duplicate" | "irrelevant"
+  flaggedAt       DateTime?
+  flaggedBy       String?   // admin userId
+
+  postedAt        DateTime?
+  discoveredAt    DateTime  @default(now())
+
+  matches         JobMatch[]
+
+  @@index([companyName])
+  @@index([discoveredAt])
+  @@index([isFlagged])
+  @@map("job_listings")
+}
+
+// ═══════════════════════════════════════════════════════════
+//  JOB MATCHES & TRACKING
+// ═══════════════════════════════════════════════════════════
+
+model JobMatch {
+  id              String            @id @default(cuid())
+  workspaceId     String
+  workspace       Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  userId          String
+  user            User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  jobListingId    String
+  jobListing      JobListing        @relation(fields: [jobListingId], references: [id], onDelete: Cascade)
+
+  similarityScore Float
+  scoreBreakdown  Json?             // { matched: [...], penalised: [...] }
+  status          ApplicationStatus @default(DISCOVERED)
+
+  appliedAt       DateTime?
+  resumeVersionId String?
+
+  notes           String?           @db.Text
+  activityLog     ActivityEntry[]
+
+  // AI features attached to this match
+  coverLetters    CoverLetter[]
+  optimizationRuns ResumeOptimizationRun[]
+
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  @@unique([userId, jobListingId])
+  @@index([workspaceId, status])
+  @@index([userId, status])
+  @@map("job_matches")
+}
+
+model ActivityEntry {
+  id          String    @id @default(cuid())
+  jobMatchId  String
+  jobMatch    JobMatch  @relation(fields: [jobMatchId], references: [id], onDelete: Cascade)
+  type        String    // "status_change" | "note_added" | "reminder_set" | "cover_letter_generated"
+  payload     Json
+  createdAt   DateTime  @default(now())
+
+  @@index([jobMatchId])
+  @@map("activity_entries")
+}
+
+// ═══════════════════════════════════════════════════════════
+//  NOTIFICATIONS
+// ═══════════════════════════════════════════════════════════
+
+model NotificationLog {
+  id              String    @id @default(cuid())
+  userId          String
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  channel         String    // "telegram" | "email" | "webhook"
+  destination     String
+  payloadSnapshot Json
+  delivered       Boolean   @default(false)
+  retryCount      Int       @default(0)
+  sentAt          DateTime  @default(now())
+
+  @@index([userId, channel])
+  @@map("notification_logs")
+}
+
+// ═══════════════════════════════════════════════════════════
+//  AI FEATURES
+// ═══════════════════════════════════════════════════════════
+
+model CoverLetter {
+  id             String    @id @default(cuid())
+  userId         String
+  user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  jobMatchId     String
+  jobMatch       JobMatch  @relation(fields: [jobMatchId], references: [id], onDelete: Cascade)
+
+  tone           String    // "professional" | "enthusiastic" | "concise" | "story-driven"
+  length         String    // "short" | "medium" | "long"
+  openingStyle   String    // "achievement" | "excitement" | "connection"
+
+  content        String    @db.Text
+  versions       Json      @default("[]") // [{content, generatedAt, model, promptVersion}]
+
+  promptVersion  String    @default("cover-letter-v1")
+  aiModel        String    // "gpt-4o" | "claude-3-5-sonnet-20241022"
+  tokensUsed     Int?
+  creditsCharged Int
+
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@index([userId, jobMatchId])
+  @@map("cover_letters")
+}
+
+model ResumeOptimizationRun {
+  id             String             @id @default(cuid())
+  userId         String
+  user           User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  jobMatchId     String
+  jobMatch       JobMatch           @relation(fields: [jobMatchId], references: [id], onDelete: Cascade)
+
+  status         OptimizationStatus @default(QUEUED)
+  overallScore   Int?
+  atsScore       Int?
+  report         Json?              // full structured report
+
+  promptVersion  String?            @default("resume-optimizer-v1")
+  aiModel        String?
+  tokensUsed     Int?
+  creditsCharged Int
+  errorMessage   String?
+
+  createdAt      DateTime           @default(now())
+  completedAt    DateTime?
+
+  @@index([userId, status])
+  @@index([jobMatchId])
+  @@map("resume_optimization_runs")
+}
+
+model SkillsGapReport {
+  id               String             @id @default(cuid())
+  userId           String
+  user             User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  status           OptimizationStatus @default(QUEUED)
+  listingsAnalyzed Int?
+  report           Json?
+
+  promptVersion    String?            @default("skills-gap-v1")
+  aiModel          String?
+  tokensUsed       Int?
+  creditsCharged   Int
+  triggerType      String             // "manual" | "weekly_auto"
+  errorMessage     String?
+
+  createdAt        DateTime           @default(now())
+  completedAt      DateTime?
+
+  @@index([userId, createdAt])
+  @@map("skills_gap_reports")
+}
+
+// ═══════════════════════════════════════════════════════════
+//  ADMIN
+// ═══════════════════════════════════════════════════════════
+
+model AdminAuditLog {
+  id          String    @id @default(cuid())
+  adminId     String
+  action      String    // "ban_user" | "grant_credits" | "flag_listing" | "extend_trial"
+  targetType  String    // "user" | "listing" | "scraper" | "subscription"
+  targetId    String
+  metadata    Json?
+  createdAt   DateTime  @default(now())
+
+  @@index([adminId])
+  @@index([targetType, targetId])
+  @@map("admin_audit_logs")
+}

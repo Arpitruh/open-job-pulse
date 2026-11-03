@@ -1,0 +1,15 @@
+{
+  "name": "@ojp/ai",
+  "version": "0.0.1",
+  "private": true,
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "dependencies": {
+    "openai": "^4.52.7",
+    "@anthropic-ai/sdk": "^0.26.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.10",
+    "typescript": "^5.5.3"
+  }
+}
