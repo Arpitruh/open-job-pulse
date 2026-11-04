@@ -6,6 +6,8 @@ import { verify } from "argon2";
 import crypto from "crypto";
 import { cookies, headers } from "next/headers";
 import { getToken } from "next-auth/jwt";
+import { consumeOAuthIntent } from "@/lib/oauth-intent";
+import { stripe } from "@/lib/stripe";
 
 export const authOptions: NextAuthOptions = {
   session: { strategy: "jwt" },
@@ -88,7 +90,7 @@ export const authOptions: NextAuthOptions = {
               crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected))) {
             try {
               const payload = JSON.parse(Buffer.from(encoded, "base64url").toString("utf8")) as {
-                userId: string; expires: number;
+                userId: string; expires: number; nonce?: string;
               };
               if (payload.userId && payload.expires > Date.now()) {
                 const request = new Request(process.env.NEXTAUTH_URL + "/api/auth/session", {
@@ -98,7 +100,7 @@ export const authOptions: NextAuthOptions = {
                   req: request as Parameters<typeof getToken>[0]["req"],
                   secret: process.env.NEXTAUTH_SECRET,
                 });
-                if (activeToken?.id === payload.userId) linkingUserId = payload.userId;
+                if (activeToken?.id === payload.userId && await consumeOAuthIntent("link", payload.nonce)) linkingUserId = payload.userId;
               }
             } catch {
               // Invalid intent is never accepted as account-linking authorization.
@@ -148,11 +150,11 @@ export const authOptions: NextAuthOptions = {
               crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected))) {
             try {
               const payload = JSON.parse(Buffer.from(encoded, "base64url").toString("utf8")) as {
-                mode?: string; expires?: number;
+                mode?: string; expires?: number; nonce?: string;
               };
               if (payload.expires && payload.expires > Date.now() &&
                   (payload.mode === "login" || payload.mode === "signup")) {
-                mode = payload.mode;
+                if (await consumeOAuthIntent("mode", payload.nonce)) mode = payload.mode;
               }
             } catch {
               // Reject malformed intent.
@@ -175,17 +177,58 @@ export const authOptions: NextAuthOptions = {
 
         // LinkedIn-first signup: persist a real application user and profile.
         // Unique constraints on email and linkedinId protect concurrent signups.
-        appUser = await db.user.create({
-          data: {
-            email,
-            linkedinId,
-            linkedinName: user.name ?? null,
-            linkedinProfileUrl: (user as { linkedinProfileUrl?: string | null }).linkedinProfileUrl ?? null,
-            profile: {
-              create: { fullName: user.name?.trim() || email.split("@")[0] || email },
-            },
-          },
-        });
+        const fullName = user.name?.trim() || email.split("@")[0] || email;
+        let customerId: string | null = null;
+        try {
+          const customer = await stripe.customers.create({
+            email, name: fullName, metadata: { source: "openjobpulse", provider: "linkedin" },
+          });
+          customerId = customer.id;
+          const subscription = await stripe.subscriptions.create({
+            customer: customer.id,
+            items: [{ price: process.env.STRIPE_PRICE_MONTHLY! }],
+            trial_period_days: 7,
+            payment_behavior: "default_incomplete",
+          });
+          if (!subscription.trial_end) throw new Error("Stripe trial end missing");
+          const trialEnd = new Date(subscription.trial_end * 1000);
+          appUser = await db.$transaction(async tx => {
+            const newUser = await tx.user.create({
+              data: {
+                email, linkedinId, linkedinName: user.name ?? null,
+                linkedinProfileUrl: (user as { linkedinProfileUrl?: string | null }).linkedinProfileUrl ?? null,
+                profile: { create: { fullName, creditBalance: 50, creditsLifetime: 50 } },
+              },
+            });
+            await tx.subscription.create({
+              data: {
+                userId: newUser.id, stripeCustomerId: customer.id,
+                stripeSubscriptionId: subscription.id, status: "TRIALING",
+                trialEnd, currentPeriodStart: new Date(), currentPeriodEnd: trialEnd,
+              },
+            });
+            await tx.creditTransaction.create({
+              data: {
+                userId: newUser.id, type: "TRIAL_GRANT", amount: 50,
+                balance: 50, description: "7-day trial credit grant",
+              },
+            });
+            const workspace = await tx.workspace.create({
+              data: { name: fullName + "'s Workspace", slug: newUser.id + "-workspace" },
+            });
+            await tx.workspaceMember.create({
+              data: { workspaceId: workspace.id, userId: newUser.id, role: "owner" },
+            });
+            return newUser;
+          });
+        } catch (error) {
+          if (customerId) {
+            try { await stripe.customers.del(customerId); }
+            catch (cleanupError) { console.error("LinkedIn signup Stripe cleanup failed", cleanupError); }
+          }
+          console.error("LinkedIn signup provisioning failed", error);
+          return "/register?error=ProvisioningFailed";
+        }
       }
 
       // NextAuth's provider ID is not the application's Prisma user ID.
@@ -208,9 +251,15 @@ export const authOptions: NextAuthOptions = {
       if (token.id) {
         const current = await db.user.findUnique({
           where: { id: token.id as string },
-          select: { role: true, identityLockedAt: true, linkedinId: true },
+          select: { role: true, identityLockedAt: true, linkedinId: true, passwordHash: true },
         });
         if (!current) { token.id = ""; return token; }
+        const passwordFingerprint = crypto.createHash("sha256").update(current.passwordHash ?? "").digest("hex");
+        if (!user && token.passwordFingerprint !== passwordFingerprint) {
+          token.id = "";
+          return token;
+        }
+        token.passwordFingerprint = passwordFingerprint;
         token.role = current.role;
         token.identityLockedAt = current.identityLockedAt?.toISOString() ?? null;
         token.linkedinId = current.linkedinId;
