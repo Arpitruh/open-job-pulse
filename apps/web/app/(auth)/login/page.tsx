@@ -38,6 +38,7 @@ export default function LoginPage() {
 
   async function handleLogin(e: React.FormEvent) {
     e.preventDefault();
+    setErrorParam(null);
     setLoading(true);
     try {
       const result = await signIn("credentials", {
@@ -144,6 +145,7 @@ export default function LoginPage() {
             Sign In
           </button>
         </form>
+        <p className="mt-3 text-right text-sm"><a href="/forgot-password" className="text-blue-600 hover:underline">Forgot password?</a></p>
 
         <p className="text-center text-sm text-gray-500 mt-6">
           Don&apos;t have an account?{" "}
