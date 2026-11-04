@@ -42,6 +42,7 @@ export const authOptions: NextAuthOptions = {
   clientId: process.env.LINKEDIN_CLIENT_ID!,
   clientSecret: process.env.LINKEDIN_CLIENT_SECRET!,
   issuer: "https://www.linkedin.com/oauth",
+  jwks_endpoint: "https://www.linkedin.com/oauth/openid/jwks",
   authorization: {
     params: { scope: "openid profile email" },
   },
