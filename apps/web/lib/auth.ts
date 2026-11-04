@@ -77,7 +77,7 @@ export const authOptions: NextAuthOptions = {
       if (blockedLinkedIn || blockedEmail) return "/register?error=blocked";
 
       // Link only after an explicit action by an already authenticated user.
-      const intent = cookies().get("ojp_link_linkedin")?.value;
+      const intent = (await cookies()).get("ojp_link_linkedin")?.value;
       let linkingUserId: string | null = null;
       if (intent && process.env.NEXTAUTH_SECRET) {
         const [encoded, signature] = intent.split(".");
@@ -92,7 +92,7 @@ export const authOptions: NextAuthOptions = {
               };
               if (payload.userId && payload.expires > Date.now()) {
                 const request = new Request(process.env.NEXTAUTH_URL + "/api/auth/session", {
-                  headers: headers(),
+                  headers: await headers(),
                 });
                 const activeToken = await getToken({
                   req: request as Parameters<typeof getToken>[0]["req"],
@@ -170,7 +170,7 @@ export const authOptions: NextAuthOptions = {
 
     async jwt({ token, user }) {
       if (user) {
-        token.id = user.id;
+        token.id = user.id ?? "";
         token.role = (user as { role?: string }).role ?? "USER";
         token.identityLockedAt =
           (user as { identityLockedAt?: string | null }).identityLockedAt ?? null;
@@ -182,7 +182,7 @@ export const authOptions: NextAuthOptions = {
           where: { id: token.id as string },
           select: { role: true, identityLockedAt: true, linkedinId: true },
         });
-        if (!current) return { ...token, id: undefined };
+        if (!current) { token.id = ""; return token; }
         token.role = current.role;
         token.identityLockedAt = current.identityLockedAt?.toISOString() ?? null;
         token.linkedinId = current.linkedinId;
