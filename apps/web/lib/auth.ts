@@ -208,9 +208,15 @@ export const authOptions: NextAuthOptions = {
       if (token.id) {
         const current = await db.user.findUnique({
           where: { id: token.id as string },
-          select: { role: true, identityLockedAt: true, linkedinId: true },
+          select: { role: true, identityLockedAt: true, linkedinId: true, passwordHash: true },
         });
         if (!current) { token.id = ""; return token; }
+        const passwordFingerprint = crypto.createHash("sha256").update(current.passwordHash ?? "").digest("hex");
+        if (!user && token.passwordFingerprint !== passwordFingerprint) {
+          token.id = "";
+          return token;
+        }
+        token.passwordFingerprint = passwordFingerprint;
         token.role = current.role;
         token.identityLockedAt = current.identityLockedAt?.toISOString() ?? null;
         token.linkedinId = current.linkedinId;

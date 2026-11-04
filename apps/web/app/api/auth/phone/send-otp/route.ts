@@ -56,7 +56,7 @@ export async function POST(req: NextRequest) {
     db.blockedIdentity.findUnique({ where: { phoneHash } }),
   ]);
 
-  if (existingPhone || blocked) {
+  if ((existingPhone && existingPhone.id !== session.user.id) || blocked) {
     return NextResponse.json(
       {
         error:

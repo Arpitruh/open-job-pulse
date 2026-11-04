@@ -29,6 +29,11 @@ export async function POST(req: NextRequest) {
 
   const phone = normalizePhone(body.phone);
 
+  const owner = await db.user.findUnique({ where: { phoneNumber: phone } });
+  if (owner && owner.id !== userId) {
+    return NextResponse.json({ error: "Phone number already registered." }, { status: 409 });
+  }
+
   // ── Verify OTP ────────────────────────────────────────────────────────────
   const result = await verifyOtp(phone, body.code);
   if (!result.valid) {
