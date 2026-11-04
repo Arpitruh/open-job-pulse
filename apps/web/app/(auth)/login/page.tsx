@@ -13,10 +13,14 @@ export default function LoginPage() {
   const [form, setForm] = useState({ email: "", password: "" });
 
   useEffect(() => {
-    setErrorParam(new URLSearchParams(window.location.search).get("error"));
+    const url = new URL(window.location.href);
+    setErrorParam(url.searchParams.get("error"));
+    url.searchParams.delete("error");
+    window.history.replaceState({}, "", url.pathname + url.search + url.hash);
   }, []);
 
   async function startLinkedIn() {
+    setErrorParam(null);
     setLoading(true);
     try {
       const response = await fetch("/api/auth/linkedin-intent", {
