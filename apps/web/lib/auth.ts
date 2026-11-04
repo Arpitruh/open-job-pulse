@@ -6,6 +6,7 @@ import { verify } from "argon2";
 import crypto from "crypto";
 import { cookies, headers } from "next/headers";
 import { getToken } from "next-auth/jwt";
+import { consumeOAuthIntent } from "@/lib/oauth-intent";
 
 export const authOptions: NextAuthOptions = {
   session: { strategy: "jwt" },
@@ -88,7 +89,7 @@ export const authOptions: NextAuthOptions = {
               crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected))) {
             try {
               const payload = JSON.parse(Buffer.from(encoded, "base64url").toString("utf8")) as {
-                userId: string; expires: number;
+                userId: string; expires: number; nonce?: string;
               };
               if (payload.userId && payload.expires > Date.now()) {
                 const request = new Request(process.env.NEXTAUTH_URL + "/api/auth/session", {
@@ -98,7 +99,7 @@ export const authOptions: NextAuthOptions = {
                   req: request as Parameters<typeof getToken>[0]["req"],
                   secret: process.env.NEXTAUTH_SECRET,
                 });
-                if (activeToken?.id === payload.userId) linkingUserId = payload.userId;
+                if (activeToken?.id === payload.userId && await consumeOAuthIntent("link", payload.nonce)) linkingUserId = payload.userId;
               }
             } catch {
               // Invalid intent is never accepted as account-linking authorization.
@@ -148,11 +149,11 @@ export const authOptions: NextAuthOptions = {
               crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected))) {
             try {
               const payload = JSON.parse(Buffer.from(encoded, "base64url").toString("utf8")) as {
-                mode?: string; expires?: number;
+                mode?: string; expires?: number; nonce?: string;
               };
               if (payload.expires && payload.expires > Date.now() &&
                   (payload.mode === "login" || payload.mode === "signup")) {
-                mode = payload.mode;
+                if (await consumeOAuthIntent("mode", payload.nonce)) mode = payload.mode;
               }
             } catch {
               // Reject malformed intent.
