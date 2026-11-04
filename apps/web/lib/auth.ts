@@ -61,43 +61,69 @@ export const authOptions: NextAuthOptions = {
   ],
   callbacks: {
     async signIn({ user, account }) {
-      if (account?.provider === "linkedin") {
-        const linkedinId = account.providerAccountId;
+      if (account?.provider !== "linkedin") return true;
 
-        // Check blocked identities
-        const blocked = await db.blockedIdentity.findUnique({
-          where: { linkedinId },
+      const linkedinId = account.providerAccountId;
+      const email = user.email?.trim().toLowerCase();
+      if (!linkedinId || !email) return false;
+
+      const emailHash = crypto.createHash("sha256").update(email).digest("hex");
+      const [blockedLinkedIn, blockedEmail] = await Promise.all([
+        db.blockedIdentity.findUnique({ where: { linkedinId } }),
+        db.blockedIdentity.findUnique({ where: { emailHash } }),
+      ]);
+      if (blockedLinkedIn || blockedEmail) return "/register?error=blocked";
+
+      let appUser = await db.user.findUnique({ where: { linkedinId } });
+      if (appUser) {
+        // Never allow a previously linked identity to silently switch email accounts.
+        if (appUser.email.toLowerCase() !== email) return false;
+      } else {
+        // Existing password accounts must use an authenticated, explicit linking flow.
+        const emailOwner = await db.user.findUnique({ where: { email } });
+        if (emailOwner) return "/register?error=blocked";
+
+        // LinkedIn-first signup: persist a real application user and profile.
+        // Unique constraints on email and linkedinId protect concurrent signups.
+        appUser = await db.user.create({
+          data: {
+            email,
+            linkedinId,
+            linkedinName: user.name ?? null,
+            linkedinProfileUrl: (user as { linkedinProfileUrl?: string | null }).linkedinProfileUrl ?? null,
+            profile: {
+              create: { fullName: user.name?.trim() || email.split("@")[0] },
+            },
+          },
         });
-        if (blocked) return "/register?error=blocked";
-
-        // Check if LinkedIn already linked to different account
-        const existing = await db.user.findUnique({
-          where: { linkedinId },
-        });
-
-        if (!existing) {
-          // New LinkedIn user — check email isn't already registered
-          const emailExists = await db.user.findUnique({
-            where: { email: user.email! },
-          });
-          const emailHash = crypto
-            .createHash("sha256")
-            .update(user.email!.toLowerCase())
-            .digest("hex");
-          const emailBlocked = await db.blockedIdentity.findUnique({
-            where: { emailHash },
-          });
-          if (emailExists || emailBlocked) return "/register?error=blocked";
-        }
       }
+
+      // NextAuth's provider ID is not the application's Prisma user ID.
+      user.id = appUser.id;
+      (user as typeof user & { role: string; identityLockedAt: string | null }).role = appUser.role;
+      (user as typeof user & { identityLockedAt: string | null }).identityLockedAt =
+        appUser.identityLockedAt?.toISOString() ?? null;
       return true;
     },
 
     async jwt({ token, user }) {
       if (user) {
         token.id = user.id;
-        token.role = (user as any).role;
-        token.identityLockedAt = (user as any).identityLockedAt;
+        token.role = (user as { role?: string }).role ?? "USER";
+        token.identityLockedAt =
+          (user as { identityLockedAt?: string | null }).identityLockedAt ?? null;
+      }
+      // Phone verification happens after sign-in. Read its updated status
+      // rather than keeping a stale onboarding state in the JWT.
+      if (token.id) {
+        const current = await db.user.findUnique({
+          where: { id: token.id as string },
+          select: { role: true, identityLockedAt: true, linkedinId: true },
+        });
+        if (!current) return { ...token, id: undefined };
+        token.role = current.role;
+        token.identityLockedAt = current.identityLockedAt?.toISOString() ?? null;
+        token.linkedinId = current.linkedinId;
       }
       return token;
     },
@@ -106,6 +132,8 @@ export const authOptions: NextAuthOptions = {
       session.user.id = token.id as string;
       session.user.role = token.role as string;
       session.user.identityLockedAt = token.identityLockedAt as string | null;
+      (session.user as typeof session.user & { linkedinId?: string | null }).linkedinId =
+        (token.linkedinId as string | null) ?? null;
       return session;
     },
   },
