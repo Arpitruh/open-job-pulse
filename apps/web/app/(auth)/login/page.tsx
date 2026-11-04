@@ -16,6 +16,22 @@ export default function LoginPage() {
     setErrorParam(new URLSearchParams(window.location.search).get("error"));
   }, []);
 
+  async function startLinkedIn() {
+    setLoading(true);
+    try {
+      const response = await fetch("/api/auth/linkedin-intent", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mode: "login" }),
+      });
+      if (!response.ok) throw new Error("Could not start LinkedIn authentication");
+      await signIn("linkedin", { callbackUrl: "/dashboard" });
+    } catch {
+      toast.error("Unable to start LinkedIn authentication. Try again.");
+      setLoading(false);
+    }
+  }
+
   async function handleLogin(e: React.FormEvent) {
     e.preventDefault();
     setLoading(true);
@@ -66,9 +82,12 @@ export default function LoginPage() {
           </div>
         )}
 
+        {errorParam === "LinkedInNotRegistered" && <p className="mb-4 text-sm text-amber-800">No LinkedIn account found. Please sign up first.</p>}
+        {errorParam === "AccountExists" && <p className="mb-4 text-sm text-amber-800">Account already exists. Sign in instead.</p>}
+        {errorParam === "LinkedInIntentExpired" && <p className="mb-4 text-sm text-amber-800">LinkedIn request expired. Please try again.</p>}
         {/* LinkedIn */}
         <button
-          onClick={() => signIn("linkedin", { callbackUrl: "/dashboard" })}
+          onClick={startLinkedIn}
           className="w-full flex items-center justify-center gap-3 bg-[#0A66C2] text-white rounded-lg py-3 px-4 font-medium hover:bg-[#0958a8] transition-colors mb-4"
         >
           <svg className="w-5 h-5" viewBox="0 0 24 24" fill="currentColor">
