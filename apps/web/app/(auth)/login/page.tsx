@@ -1,18 +1,20 @@
 "use client";
 
-import { Suspense, useState } from "react";
+import { useEffect, useState } from "react";
 import { signIn } from "next-auth/react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Loader2, BriefcaseBusiness } from "lucide-react";
 
-function LoginContent() {
+export default function LoginPage() {
   const router = useRouter();
-  const searchParams = useSearchParams();
+  const [errorParam, setErrorParam] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [form, setForm] = useState({ email: "", password: "" });
 
-  const errorParam = searchParams.get("error");
+  useEffect(() => {
+    setErrorParam(new URLSearchParams(window.location.search).get("error"));
+  }, []);
 
   async function handleLogin(e: React.FormEvent) {
     e.preventDefault();
@@ -122,12 +124,5 @@ function LoginContent() {
         </p>
       </div>
     </div>
-  );
-}
-export default function LoginPage() {
-  return (
-    <Suspense fallback={<div className="min-h-screen flex items-center justify-center">Loading...</div>}>
-      <LoginContent />
-    </Suspense>
   );
 }
