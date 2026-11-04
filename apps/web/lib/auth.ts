@@ -4,6 +4,8 @@ import LinkedInProvider from "next-auth/providers/linkedin";
 import { db } from "@ojp/db";
 import { verify } from "argon2";
 import crypto from "crypto";
+import { cookies, headers } from "next/headers";
+import { getToken } from "next-auth/jwt";
 
 export const authOptions: NextAuthOptions = {
   session: { strategy: "jwt" },
@@ -74,6 +76,66 @@ export const authOptions: NextAuthOptions = {
       ]);
       if (blockedLinkedIn || blockedEmail) return "/register?error=blocked";
 
+      // Link only after an explicit action by an already authenticated user.
+      const intent = cookies().get("ojp_link_linkedin")?.value;
+      let linkingUserId: string | null = null;
+      if (intent && process.env.NEXTAUTH_SECRET) {
+        const [encoded, signature] = intent.split(".");
+        if (encoded && signature) {
+          const expected = crypto.createHmac("sha256", process.env.NEXTAUTH_SECRET)
+            .update(encoded).digest("hex");
+          if (signature.length === expected.length &&
+              crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected))) {
+            try {
+              const payload = JSON.parse(Buffer.from(encoded, "base64url").toString("utf8")) as {
+                userId: string; expires: number;
+              };
+              if (payload.userId && payload.expires > Date.now()) {
+                const request = new Request(process.env.NEXTAUTH_URL + "/api/auth/session", {
+                  headers: headers(),
+                });
+                const activeToken = await getToken({
+                  req: request as Parameters<typeof getToken>[0]["req"],
+                  secret: process.env.NEXTAUTH_SECRET,
+                });
+                if (activeToken?.id === payload.userId) linkingUserId = payload.userId;
+              }
+            } catch {
+              // Invalid intent is never accepted as account-linking authorization.
+            }
+          }
+        }
+      }
+
+      if (linkingUserId) {
+        const linkedElsewhere = await db.user.findUnique({ where: { linkedinId } });
+        if (linkedElsewhere && linkedElsewhere.id !== linkingUserId) {
+          return "/onboarding/connect-linkedin?error=already-linked";
+        }
+        const owner = await db.user.findUnique({ where: { id: linkingUserId } });
+        if (!owner) return false;
+        if (owner.linkedinId && owner.linkedinId !== linkedinId) {
+          return "/onboarding/connect-linkedin?error=already-linked";
+        }
+        const appUser = await db.user.update({
+          where: { id: owner.id },
+          data: {
+            linkedinId,
+            linkedinName: user.name ?? null,
+            linkedinProfileUrl:
+              (user as { linkedinProfileUrl?: string | null }).linkedinProfileUrl ?? null,
+            identityLockedAt: owner.phoneVerified
+              ? (owner.identityLockedAt ?? new Date())
+              : owner.identityLockedAt,
+          },
+        });
+        user.id = appUser.id;
+        (user as typeof user & { role: string; identityLockedAt: string | null }).role = appUser.role;
+        (user as typeof user & { identityLockedAt: string | null }).identityLockedAt =
+          appUser.identityLockedAt?.toISOString() ?? null;
+        return true;
+      }
+
       let appUser = await db.user.findUnique({ where: { linkedinId } });
       if (appUser) {
         // Never allow a previously linked identity to silently switch email accounts.
@@ -81,7 +143,7 @@ export const authOptions: NextAuthOptions = {
       } else {
         // Existing password accounts must use an authenticated, explicit linking flow.
         const emailOwner = await db.user.findUnique({ where: { email } });
-        if (emailOwner) return "/register?error=blocked";
+        if (emailOwner) return "/login?error=AccountNotLinked";
 
         // LinkedIn-first signup: persist a real application user and profile.
         // Unique constraints on email and linkedinId protect concurrent signups.
