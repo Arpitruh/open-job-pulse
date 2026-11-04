@@ -1,0 +1,37 @@
+name: CI Build
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      NEXTAUTH_URL: http://localhost:3000
+      NEXTAUTH_SECRET: ci-only-secret-not-for-production
+      LINKEDIN_CLIENT_ID: ci-linkedin-client
+      LINKEDIN_CLIENT_SECRET: ci-linkedin-secret
+      DATABASE_URL: postgresql://ci:ci@localhost:5432/ojp
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Generate Prisma client
+        run: npm run db:generate --workspace=@ojp/db
+      - name: Build web app
+        run: npm run build --workspace=@ojp/web
