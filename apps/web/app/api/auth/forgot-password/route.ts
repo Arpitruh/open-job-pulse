@@ -2,12 +2,23 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@ojp/db";
 import { Resend } from "resend";
 import crypto from "crypto";
+import { Redis } from "ioredis";
 
 export async function POST(req: NextRequest) {
   const generic = { message: "If that email is registered, a reset link will be sent." };
   const { email } = await req.json().catch(() => ({ email: null }));
   if (typeof email !== "string" || email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
     return NextResponse.json({ error: "Enter a valid email." }, { status: 400 });
+  }
+  if (!process.env.REDIS_URL) return NextResponse.json({ error: "Recovery unavailable." }, { status: 503 });
+  const redis = new Redis(process.env.REDIS_URL);
+  try {
+    const key = "reset:" + crypto.createHash("sha256").update(email.trim().toLowerCase()).digest("hex");
+    const count = await redis.incr(key);
+    if (count === 1) await redis.expire(key, 900);
+    if (count > 3) return NextResponse.json({ error: "Too many requests." }, { status: 429 });
+  } finally {
+    redis.disconnect();
   }
   const secret = process.env.PASSWORD_RESET_SECRET || process.env.NEXTAUTH_SECRET;
   if (!secret || !process.env.RESEND_API_KEY || !process.env.RESEND_FROM_EMAIL) {
