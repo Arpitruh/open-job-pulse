@@ -57,6 +57,8 @@ export async function POST(req: NextRequest) {
   });
 
   // ── 4. Create user + profile + Stripe customer + subscription in one tx ──
+  let createdCustomerId: string | null = null;
+  let createdSubscriptionId: string | null = null;
   try {
     // Create Stripe customer first (outside tx — external call)
     const stripeCustomer = await stripe.customers.create({
@@ -65,6 +67,7 @@ export async function POST(req: NextRequest) {
       metadata: { source: "openjobpulse" },
     });
 
+    createdCustomerId = stripeCustomer.id;
     // Start Stripe trial subscription
     const stripeSubscription = await stripe.subscriptions.create({
       customer: stripeCustomer.id,
@@ -74,6 +77,7 @@ export async function POST(req: NextRequest) {
       expand: ["latest_invoice.payment_intent"],
     });
 
+    createdSubscriptionId = stripeSubscription.id;
     const trialEnd = new Date(stripeSubscription.trial_end! * 1000);
 
     // DB transaction
@@ -150,6 +154,15 @@ export async function POST(req: NextRequest) {
     );
   } catch (err: any) {
     console.error("[Register] Error:", err);
+    // Compensate for Stripe resources created before a failed DB transaction.
+    // Deleting the customer also removes its subscriptions.
+    if (createdCustomerId) {
+      try {
+        await stripe.customers.del(createdCustomerId);
+      } catch (cleanupError) {
+        console.error("[Register] Stripe cleanup failed:", cleanupError, { createdCustomerId, createdSubscriptionId });
+      }
+    }
     return NextResponse.json(
       { error: "Registration failed. Please try again." },
       { status: 500 }
