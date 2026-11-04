@@ -81,7 +81,7 @@ export const authOptions: NextAuthOptions = {
       } else {
         // Existing password accounts must use an authenticated, explicit linking flow.
         const emailOwner = await db.user.findUnique({ where: { email } });
-        if (emailOwner) return "/register?error=blocked";
+        if (emailOwner) return "/login?error=AccountNotLinked";
 
         // LinkedIn-first signup: persist a real application user and profile.
         // Unique constraints on email and linkedinId protect concurrent signups.
