@@ -1,14 +1,33 @@
 "use client";
 
-import { signIn, useSession } from "next-auth/react";
+import { signIn } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { Loader2, BriefcaseBusiness, CheckCircle2, Lock } from "lucide-react";
 
 export default function ConnectLinkedInPage() {
-  const { data: session, status } = useSession();
+  const [session, setSession] = useState<{ user?: { identityLockedAt?: string | null; linkedinId?: string | null } } | null>(null);
+  const [status, setStatus] = useState<"loading" | "authenticated" | "unauthenticated">("loading");
   const router = useRouter();
   const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    fetch("/api/auth/session")
+      .then((response) => {
+        if (!response.ok) throw new Error("Session request failed");
+        return response.json();
+      })
+      .then((data) => {
+        if (!active) return;
+        setSession(data?.user ? data : null);
+        setStatus(data?.user ? "authenticated" : "unauthenticated");
+      })
+      .catch(() => {
+        if (active) setStatus("unauthenticated");
+      });
+    return () => { active = false; };
+  }, []);
 
   // If identity already locked, redirect to dashboard
   useEffect(() => {
