@@ -5,7 +5,8 @@ import { db } from "@ojp/db";
 import { verify } from "argon2";
 import crypto from "crypto";
 
-export const authOptions: NextAuthOptions = {
+export function createAuthOptions(linkingUserId?: string): NextAuthOptions {
+return {
   session: { strategy: "jwt" },
   pages: {
     signIn: "/login",
@@ -75,6 +76,27 @@ export const authOptions: NextAuthOptions = {
       if (blockedLinkedIn || blockedEmail) return "/register?error=blocked";
 
       let appUser = await db.user.findUnique({ where: { linkedinId } });
+      if (linkingUserId) {
+        const target = await db.user.findUnique({ where: { id: linkingUserId } });
+        if (!target || (appUser && appUser.id !== target.id)) return false;
+        if (target.linkedinId && target.linkedinId !== linkedinId) return false;
+        const updated = await db.user.updateMany({
+          where: { id: target.id, OR: [{ linkedinId: null }, { linkedinId }] },
+          data: {
+            linkedinId,
+            linkedinName: user.name ?? null,
+            linkedinProfileUrl: (user as { linkedinProfileUrl?: string | null }).linkedinProfileUrl ?? null,
+          },
+        });
+        if (updated.count !== 1) return false;
+        appUser = await db.user.findUnique({ where: { id: target.id } });
+        if (!appUser) return false;
+        user.id = appUser.id;
+        (user as typeof user & { role: string; identityLockedAt: string | null }).role = appUser.role;
+        (user as typeof user & { identityLockedAt: string | null }).identityLockedAt =
+          appUser.identityLockedAt?.toISOString() ?? null;
+        return true;
+      }
       if (appUser) {
         // Never allow a previously linked identity to silently switch email accounts.
         if (appUser.email.toLowerCase() !== email) return false;
@@ -138,3 +160,6 @@ export const authOptions: NextAuthOptions = {
     },
   },
 };
+}
+
+export const authOptions: NextAuthOptions = createAuthOptions();
