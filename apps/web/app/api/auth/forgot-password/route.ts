@@ -16,7 +16,11 @@ export async function POST(req: NextRequest) {
     const key = "reset:" + crypto.createHash("sha256").update(email.trim().toLowerCase()).digest("hex");
     const count = await redis.incr(key);
     if (count === 1) await redis.expire(key, 900);
-    if (count > 3) return NextResponse.json({ error: "Too many requests." }, { status: 429 });
+    const ip = req.headers.get("x-real-ip") ?? req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? "unknown";
+    const ipKey = "reset-ip:" + crypto.createHash("sha256").update(ip).digest("hex");
+    const ipCount = await redis.incr(ipKey);
+    if (ipCount === 1) await redis.expire(ipKey, 900);
+    if (count > 3 || ipCount > 10) return NextResponse.json({ error: "Too many requests." }, { status: 429 });
   } catch {
     return NextResponse.json({ error: "Recovery unavailable." }, { status: 503 });
   } finally {
