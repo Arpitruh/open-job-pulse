@@ -11,12 +11,14 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Enter a valid email." }, { status: 400 });
   }
   if (!process.env.REDIS_URL) return NextResponse.json({ error: "Recovery unavailable." }, { status: 503 });
-  const redis = new Redis(process.env.REDIS_URL);
+  const redis = new Redis(process.env.REDIS_URL, { lazyConnect: true, connectTimeout: 2000, maxRetriesPerRequest: 1 });
   try {
     const key = "reset:" + crypto.createHash("sha256").update(email.trim().toLowerCase()).digest("hex");
     const count = await redis.incr(key);
     if (count === 1) await redis.expire(key, 900);
     if (count > 3) return NextResponse.json({ error: "Too many requests." }, { status: 429 });
+  } catch {
+    return NextResponse.json({ error: "Recovery unavailable." }, { status: 503 });
   } finally {
     redis.disconnect();
   }
