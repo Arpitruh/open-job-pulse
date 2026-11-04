@@ -6,6 +6,7 @@ import { verify } from "argon2";
 import crypto from "crypto";
 import { cookies, headers } from "next/headers";
 import { getToken } from "next-auth/jwt";
+import { stripe } from "@/lib/stripe";
 
 export const authOptions: NextAuthOptions = {
   session: { strategy: "jwt" },
@@ -175,17 +176,58 @@ export const authOptions: NextAuthOptions = {
 
         // LinkedIn-first signup: persist a real application user and profile.
         // Unique constraints on email and linkedinId protect concurrent signups.
-        appUser = await db.user.create({
-          data: {
-            email,
-            linkedinId,
-            linkedinName: user.name ?? null,
-            linkedinProfileUrl: (user as { linkedinProfileUrl?: string | null }).linkedinProfileUrl ?? null,
-            profile: {
-              create: { fullName: user.name?.trim() || email.split("@")[0] || email },
-            },
-          },
-        });
+        const fullName = user.name?.trim() || email.split("@")[0] || email;
+        let customerId: string | null = null;
+        try {
+          const customer = await stripe.customers.create({
+            email, name: fullName, metadata: { source: "openjobpulse", provider: "linkedin" },
+          });
+          customerId = customer.id;
+          const subscription = await stripe.subscriptions.create({
+            customer: customer.id,
+            items: [{ price: process.env.STRIPE_PRICE_MONTHLY! }],
+            trial_period_days: 7,
+            payment_behavior: "default_incomplete",
+          });
+          if (!subscription.trial_end) throw new Error("Stripe trial end missing");
+          const trialEnd = new Date(subscription.trial_end * 1000);
+          appUser = await db.$transaction(async tx => {
+            const newUser = await tx.user.create({
+              data: {
+                email, linkedinId, linkedinName: user.name ?? null,
+                linkedinProfileUrl: (user as { linkedinProfileUrl?: string | null }).linkedinProfileUrl ?? null,
+                profile: { create: { fullName, creditBalance: 50, creditsLifetime: 50 } },
+              },
+            });
+            await tx.subscription.create({
+              data: {
+                userId: newUser.id, stripeCustomerId: customer.id,
+                stripeSubscriptionId: subscription.id, status: "TRIALING",
+                trialEnd, currentPeriodStart: new Date(), currentPeriodEnd: trialEnd,
+              },
+            });
+            await tx.creditTransaction.create({
+              data: {
+                userId: newUser.id, type: "TRIAL_GRANT", amount: 50,
+                balance: 50, description: "7-day trial credit grant",
+              },
+            });
+            const workspace = await tx.workspace.create({
+              data: { name: fullName + "'s Workspace", slug: newUser.id + "-workspace" },
+            });
+            await tx.workspaceMember.create({
+              data: { workspaceId: workspace.id, userId: newUser.id, role: "owner" },
+            });
+            return newUser;
+          });
+        } catch (error) {
+          if (customerId) {
+            try { await stripe.customers.del(customerId); }
+            catch (cleanupError) { console.error("LinkedIn signup Stripe cleanup failed", cleanupError); }
+          }
+          console.error("LinkedIn signup provisioning failed", error);
+          return "/register?error=ProvisioningFailed";
+        }
       }
 
       // NextAuth's provider ID is not the application's Prisma user ID.
