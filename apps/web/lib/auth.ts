@@ -136,11 +136,39 @@ export const authOptions: NextAuthOptions = {
         return true;
       }
 
+      // A signed, short-lived intent distinguishes login from registration.
+      const modeCookie = (await cookies()).get("ojp_linkedin_mode")?.value;
+      let mode: "login" | "signup" | null = null;
+      if (modeCookie && process.env.NEXTAUTH_SECRET) {
+        const [encoded, signature] = modeCookie.split(".");
+        if (encoded && signature) {
+          const expected = crypto.createHmac("sha256", process.env.NEXTAUTH_SECRET)
+            .update(encoded).digest("hex");
+          if (signature.length === expected.length &&
+              crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected))) {
+            try {
+              const payload = JSON.parse(Buffer.from(encoded, "base64url").toString("utf8")) as {
+                mode?: string; expires?: number;
+              };
+              if (payload.expires && payload.expires > Date.now() &&
+                  (payload.mode === "login" || payload.mode === "signup")) {
+                mode = payload.mode;
+              }
+            } catch {
+              // Reject malformed intent.
+            }
+          }
+        }
+      }
+      if (!mode) return "/login?error=LinkedInIntentExpired";
+
       let appUser = await db.user.findUnique({ where: { linkedinId } });
       if (appUser) {
+        if (mode === "signup") return "/login?error=AccountExists";
         // Never allow a previously linked identity to silently switch email accounts.
         if (appUser.email.toLowerCase() !== email) return false;
       } else {
+        if (mode === "login") return "/login?error=LinkedInNotRegistered";
         // Existing password accounts must use an authenticated, explicit linking flow.
         const emailOwner = await db.user.findUnique({ where: { email } });
         if (emailOwner) return "/login?error=AccountNotLinked";
