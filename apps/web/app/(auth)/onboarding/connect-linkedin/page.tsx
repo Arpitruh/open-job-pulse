@@ -40,9 +40,16 @@ export default function ConnectLinkedInPage() {
 
   async function handleConnect() {
     setLoading(true);
-    await signIn("linkedin", {
-      callbackUrl: "/onboarding/connect-linkedin",
-    });
+    try {
+      const res = await fetch("/api/auth/link-linkedin", { method: "POST" });
+      if (!res.ok) {
+        setLoading(false);
+        return;
+      }
+      await signIn("linkedin", { callbackUrl: "/onboarding/connect-linkedin" });
+    } catch {
+      setLoading(false);
+    }
   }
 
   if (status === "loading") {
