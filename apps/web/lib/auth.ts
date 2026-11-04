@@ -154,7 +154,7 @@ export const authOptions: NextAuthOptions = {
             linkedinName: user.name ?? null,
             linkedinProfileUrl: (user as { linkedinProfileUrl?: string | null }).linkedinProfileUrl ?? null,
             profile: {
-              create: { fullName: user.name?.trim() || email.split("@")[0] },
+              create: { fullName: user.name?.trim() || email.split("@")[0] || email },
             },
           },
         });
