@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import crypto from "crypto";
+import { issueOAuthIntent } from "@/lib/oauth-intent";
 
 export async function POST(req: NextRequest) {
   if (req.headers.get("origin") !== req.nextUrl.origin) {
@@ -11,7 +12,10 @@ export async function POST(req: NextRequest) {
   }
   const secret = process.env.NEXTAUTH_SECRET;
   if (!secret) return NextResponse.json({ error: "Missing auth secret" }, { status: 500 });
-  const payload = Buffer.from(JSON.stringify({ mode, expires: Date.now() + 300000 })).toString("base64url");
+  let nonce: string;
+  try { nonce = await issueOAuthIntent("mode"); }
+  catch { return NextResponse.json({ error: "OAuth temporarily unavailable" }, { status: 503 }); }
+  const payload = Buffer.from(JSON.stringify({ mode, nonce, expires: Date.now() + 300000 })).toString("base64url");
   const signature = crypto.createHmac("sha256", secret).update(payload).digest("hex");
   const res = NextResponse.json({ ok: true });
   res.cookies.set("ojp_linkedin_mode", payload + "." + signature, {
