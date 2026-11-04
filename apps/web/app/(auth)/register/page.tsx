@@ -79,7 +79,7 @@ export default function RegisterPage() {
 
         {/* LinkedIn OAuth */}
         <button
-          onClick={handleLinkedIn}
+          onClick={startLinkedIn}
           disabled={linkedinLoading}
           className="w-full flex items-center justify-center gap-3 bg-[#0A66C2] text-white rounded-lg py-3 px-4 font-medium hover:bg-[#0958a8] transition-colors disabled:opacity-60 mb-4"
         >
