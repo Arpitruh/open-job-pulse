@@ -54,9 +54,20 @@ export default function RegisterPage() {
     }
   }
 
-  async function handleLinkedIn() {
+  async function startLinkedIn() {
     setLinkedinLoading(true);
-    await signIn("linkedin", { callbackUrl: "/onboarding/verify-phone" });
+    try {
+      const response = await fetch("/api/auth/linkedin-intent", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mode: "signup" }),
+      });
+      if (!response.ok) throw new Error("LinkedIn signup failed");
+      await signIn("linkedin", { callbackUrl: "/onboarding/verify-phone" });
+    } catch {
+      toast.error("Unable to start LinkedIn signup.");
+      setLinkedinLoading(false);
+    }
   }
 
   return (
