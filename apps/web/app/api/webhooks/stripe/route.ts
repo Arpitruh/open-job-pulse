@@ -3,8 +3,7 @@ import { stripe } from "@/lib/stripe";
 import { db } from "@ojp/db";
 import Stripe from "stripe";
 
-// Must use raw body for Stripe signature verification
-export const config = { api: { bodyParser: false } };
+// App Router request.text() reads the raw webhook payload for signature verification.
 
 // Map Stripe subscription status → our enum
 function mapStatus(
