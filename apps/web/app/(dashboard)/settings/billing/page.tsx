@@ -49,14 +49,15 @@ export default async function BillingPage() {
           {subscription?.status === "ACTIVE" && <CheckCircle2 className="w-5 h-5 text-green-600" />}
           {subscription?.status === "TRIALING" && <Zap className="w-5 h-5 text-blue-600" />}
           {subscription?.status === "PAST_DUE" && <AlertTriangle className="w-5 h-5 text-red-600" />}
-          {(!subscription || subscription.status === "CANCELLED") && <XCircle className="w-5 h-5 text-gray-400" />}
+          {subscription?.status === "CANCELLED" && <XCircle className="w-5 h-5 text-gray-400" />}
+          {!subscription && <CheckCircle2 className="w-5 h-5 text-green-600" />}
           <div>
             <p className="font-semibold text-gray-900 text-sm">
               {subscription?.status === "TRIALING" && `Free Trial — ${trialDaysLeft} day${trialDaysLeft !== 1 ? "s" : ""} left`}
               {subscription?.status === "ACTIVE" && `Active — ${subscription.plan?.name ?? "Unknown"} Plan`}
               {subscription?.status === "PAST_DUE" && "Payment Failed"}
               {subscription?.status === "CANCELLED" && "Subscription Cancelled"}
-              {!subscription && "No Subscription"}
+              {!subscription && "Free plan — no payment required"}
             </p>
             {subscription?.currentPeriodEnd && subscription.status === "ACTIVE" && (
               <p className="text-xs text-gray-500 mt-0.5">
@@ -75,7 +76,7 @@ export default async function BillingPage() {
       </div>
 
       {/* Plans */}
-      {(subscription?.status === "TRIALING" || subscription?.status === "CANCELLED" || !subscription) && (
+      {(subscription?.status === "TRIALING" || subscription?.status === "CANCELLED") && (
         <div>
           <h2 className="font-semibold text-gray-900 mb-4 text-sm">Choose a Plan</h2>
           <div className="grid grid-cols-1 gap-3">
