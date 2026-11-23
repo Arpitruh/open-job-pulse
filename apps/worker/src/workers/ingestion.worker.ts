@@ -33,7 +33,7 @@ function buildScraper(config: any) {
 export const ingestionWorker = new Worker(
   "ingestion",
   async (job: Job<RunScraperJob>) => {
-    const { scraperConfigId, workspaceId, adapterType, sourceUrl } = job.data;
+    const { scraperConfigId } = job.data;
 
     // Fetch full config from DB
     const scraperConfig = await db.scraperConfig.findUnique({
@@ -54,15 +54,16 @@ export const ingestionWorker = new Worker(
     try {
       const scraper = buildScraper({
         scraperConfigId,
-        adapterType,
-        sourceUrl,
-        workspaceId,
+        label: scraperConfig.label,
+        adapterType: scraperConfig.adapterType,
+        sourceUrl: scraperConfig.sourceUrl,
+        workspaceId: scraperConfig.workspaceId,
         requestsPerMin: scraperConfig.requestsPerMin,
         delayMs: scraperConfig.delayMs,
         maxRetries: scraperConfig.maxRetries,
       });
 
-      const { ingested, skipped, errors } = await scraper.run();
+      const { ingested, skipped, errors, listingIds } = await scraper.run();
 
       // Mark success
       await db.scraperConfig.update({
@@ -75,18 +76,13 @@ export const ingestionWorker = new Worker(
         },
       });
 
-      // Enqueue matching jobs for new listings
-      const newListings = await db.jobListing.findMany({
-        where: { discoveredAt: { gte: new Date(Date.now() - 5 * 60 * 1000) } },
-        select: { id: true },
-        take: ingested,
-      });
-
-      for (const listing of newListings) {
+      // Only enqueue listings saved by THIS scraper run. A time-window query
+      // can accidentally dispatch listings ingested by concurrent sources.
+      for (const jobListingId of listingIds) {
         await matchingQueue.add(
           "match-jobs",
-          { jobListingId: listing.id },
-          { jobId: `match-${listing.id}`, attempts: 3 }
+          { jobListingId },
+          { jobId: `match-${jobListingId}`, attempts: 3 }
         );
       }
 

@@ -35,3 +35,5 @@ jobs:
         run: npm run db:generate --workspace=@ojp/db
       - name: Build web app
         run: npm run build --workspace=@ojp/web
+      - name: Type-check background worker
+        run: npm run type-check --workspace=@ojp/worker

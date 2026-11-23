@@ -1,38 +1,50 @@
-import cron from "node-cron";
+import cron, { type ScheduledTask } from "node-cron";
 import { ingestionQueue, aiQueue } from "@ojp/queue";
 import { db } from "@ojp/db";
 
-// ── Run all enabled scrapers on their schedule ────────────────────────────────
+// Keep exactly one cron task per scraper. Refreshes reconcile schedules rather
+// than registering another copy of every task on each hourly reload.
+const scraperTasks = new Map<string, { schedule: string; task: ScheduledTask }>();
+
 async function scheduleScrapers() {
-  const scrapers = await db.scraperConfig.findMany({
-    where: { enabled: true },
-  });
+  const scrapers = await db.scraperConfig.findMany({ where: { enabled: true } });
+  const active = new Set(scrapers.map((s) => s.id));
+
+  for (const [id, entry] of scraperTasks) {
+    if (!active.has(id)) {
+      entry.task.stop();
+      scraperTasks.delete(id);
+    }
+  }
 
   for (const scraper of scrapers) {
     const schedule = scraper.cronSchedule ?? "0 */4 * * *";
-
+    const previous = scraperTasks.get(scraper.id);
+    if (previous?.schedule === schedule) continue;
+    if (previous) {
+      previous.task.stop();
+      scraperTasks.delete(scraper.id);
+    }
     if (!cron.validate(schedule)) {
       console.warn(`[Scheduler] Invalid cron: ${schedule} for ${scraper.label}`);
       continue;
     }
-
-    cron.schedule(schedule, async () => {
-      console.log(`[Scheduler] Queuing scraper: ${scraper.label}`);
-      await ingestionQueue.add(
-        "run-scraper",
-        {
-          scraperConfigId: scraper.id,
-          workspaceId: scraper.workspaceId,
-          adapterType: scraper.adapterType,
-          sourceUrl: scraper.sourceUrl,
-        },
-        {
-          jobId: `scheduled-${scraper.id}-${Date.now()}`,
-          attempts: 3,
-        }
-      );
+    const task = cron.schedule(schedule, async () => {
+      try {
+        // Load current configuration when the trigger fires, not stale closure data.
+        const current = await db.scraperConfig.findUnique({ where: { id: scraper.id } });
+        if (!current?.enabled) return;
+        await ingestionQueue.add("run-scraper", {
+          scraperConfigId: current.id,
+          workspaceId: current.workspaceId,
+          adapterType: current.adapterType,
+          sourceUrl: current.sourceUrl,
+        }, { jobId: `scheduled-${current.id}-${Date.now()}`, attempts: 3 });
+      } catch (error) {
+        console.error(`[Scheduler] Failed to enqueue ${scraper.id}:`, error);
+      }
     });
-
+    scraperTasks.set(scraper.id, { schedule, task });
     console.log(`[Scheduler] ${scraper.label} scheduled: ${schedule}`);
   }
 }
