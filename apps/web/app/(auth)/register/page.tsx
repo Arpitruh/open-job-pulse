@@ -45,8 +45,9 @@ export default function RegisterPage() {
         return;
       }
 
-      toast.success("Account created! Let's verify your identity.");
-      router.push("/onboarding/verify-phone");
+      toast.success("Account created! Welcome to OpenJobPulse.");
+      router.push("/dashboard");
+      router.refresh();
     } catch {
       toast.error("Something went wrong. Please try again.");
     } finally {
@@ -63,7 +64,7 @@ export default function RegisterPage() {
         body: JSON.stringify({ mode: "signup" }),
       });
       if (!response.ok) throw new Error("LinkedIn signup failed");
-      await signIn("linkedin", { callbackUrl: "/onboarding/verify-phone" });
+      await signIn("linkedin", { callbackUrl: "/dashboard" });
     } catch {
       toast.error("Unable to start LinkedIn signup.");
       setLinkedinLoading(false);
@@ -169,10 +170,10 @@ export default function RegisterPage() {
         {/* Progress indicator */}
         <div className="mt-6 pt-5 border-t border-gray-100">
           <p className="text-xs text-gray-500 text-center mb-3">
-            Identity verification steps
+            Getting started
           </p>
           <div className="flex items-center gap-2">
-            {["① Account", "② Phone", "③ LinkedIn", "④ Start"].map(
+            {["① Account", "② Dashboard"].map(
               (step, i) => (
                 <div key={step} className="flex items-center gap-2 flex-1">
                   <div
@@ -184,7 +185,7 @@ export default function RegisterPage() {
                   >
                     {step}
                   </div>
-                  {i < 3 && (
+                  {i < 1 && (
                     <div className="w-2 h-px bg-gray-200 flex-shrink-0" />
                   )}
                 </div>

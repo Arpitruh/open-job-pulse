@@ -83,7 +83,7 @@ export default function LoginPage() {
 
         {errorParam === "AccountNotLinked" && (
           <div className="mb-4 p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-800">
-            This email already has an account. Sign in with your password, then connect LinkedIn during onboarding.
+            This email already has an account. Sign in with your password, then link LinkedIn from the optional connection page.
           </div>
         )}
 
@@ -150,7 +150,7 @@ export default function LoginPage() {
         <p className="text-center text-sm text-gray-500 mt-6">
           Don&apos;t have an account?{" "}
           <a href="/register" className="text-blue-600 font-medium hover:underline">
-            Start free trial
+            Create free account
           </a>
         </p>
       </div>

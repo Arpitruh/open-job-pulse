@@ -62,7 +62,7 @@ export default function VerifyPhonePage() {
       if (data.identityLocked) {
         router.push("/dashboard");
       } else {
-        router.push("/onboarding/connect-linkedin");
+        router.push("/dashboard");
       }
     } catch {
       toast.error("Something went wrong. Please try again.");
@@ -84,7 +84,7 @@ export default function VerifyPhonePage() {
 
         {/* Progress */}
         <div className="flex items-center gap-1 mb-6">
-          {["Account", "Phone", "LinkedIn", "Done"].map((s, i) => (
+          {["Account", "Optional phone", "Dashboard"].map((s, i) => (
             <div key={s} className="flex items-center gap-1 flex-1">
               <div
                 className={`h-1.5 flex-1 rounded-full ${
@@ -105,7 +105,7 @@ export default function VerifyPhonePage() {
               Verify your phone
             </h1>
             <p className="text-gray-500 text-sm mb-6">
-              We use this to prevent duplicate accounts. Choose how you&apos;d like to receive your code.
+              Optional: verify your phone to strengthen your account identity. SMS and WhatsApp verification may be unavailable without a configured provider.
             </p>
 
             {/* Channel selector */}
@@ -211,6 +211,9 @@ export default function VerifyPhonePage() {
             </button>
           </>
         )}
+        <button type="button" onClick={() => router.push("/dashboard")} className="mt-5 w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50">
+          Skip for now — Go to dashboard
+        </button>
       </div>
     </div>
   );
