@@ -110,8 +110,8 @@ async function handleEmailDigest(data: SendEmailDigestJob) {
   // Notification Service owns templates and delivery. We only submit safe,
   // structured text so a job description cannot inject markup into an email.
   const jobLines = matches.map((m, i) => {
-    const title = m.jobListing.jobTitle.replace(/[\\r\\n]+/g, " ").slice(0, 160);
-    const company = m.jobListing.companyName.replace(/[\\r\\n]+/g, " ").slice(0, 160);
+    const title = m.jobListing.jobTitle.replace(/[\r\n]+/g, " ").slice(0, 160);
+    const company = m.jobListing.companyName.replace(/[\r\n]+/g, " ").slice(0, 160);
     const url = m.jobListing.applyUrl;
     return `${i + 1}. ${title} at ${company} (${Math.round(m.similarityScore * 100)}% match) — ${url}`;
   });
@@ -122,8 +122,8 @@ async function handleEmailDigest(data: SendEmailDigestJob) {
       name: user.email.split("@")[0],
       matchCount: matches.length,
       digestType: data.digestType,
-      jobs: jobLines.join("\\n"),
-      dashboardUrl: `${(process.env.APP_URL ?? process.env.NEXTAUTH_URL ?? "").replace(/\\/$/, "")}/kanban`,
+      jobs: jobLines.join("\n"),
+      dashboardUrl: `${(process.env.APP_URL ?? process.env.NEXTAUTH_URL ?? "").replace(/\/$/, "")}/kanban`,
     },
     idempotencyKey: `openjobpulse:digest:${data.userId}:${data.digestType}:${matches.map((m) => m.id).sort().join(",")}`,
   });
