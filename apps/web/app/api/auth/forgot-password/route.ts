@@ -14,13 +14,13 @@ export async function POST(req: NextRequest) {
     console.error("Password reset email configuration missing");
     return NextResponse.json({ error: "Password recovery is temporarily unavailable." }, { status: 503 });
   }
+  const origin = process.env.NEXTAUTH_URL;
+  if (!origin) return NextResponse.json({ error: "Password recovery is temporarily unavailable." }, { status: 503 });
   const user = await db.user.findUnique({ where: { email: email.trim().toLowerCase() } });
   if (user) {
     const expires = Date.now() + 15 * 60_000;
     const payload = Buffer.from(JSON.stringify({ userId: user.id, expires })).toString("base64url");
     const signature = crypto.createHmac("sha256", secret).update(payload + "." + (user.passwordHash || "")).digest("hex");
-    const origin = process.env.NEXTAUTH_URL;
-    if (!origin) return NextResponse.json({ error: "Password recovery is temporarily unavailable." }, { status: 503 });
     const url = new URL("/reset-password", origin);
     url.searchParams.set("token", payload + "." + signature);
     try {
