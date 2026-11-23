@@ -2,7 +2,7 @@ import { Worker, type Job } from "bullmq";
 import { redisConnection } from "@ojp/queue";
 import { db } from "@ojp/db";
 import { sendMatchNotification, bot } from "../telegram/bot";
-import { Resend } from "resend";
+import { sendTemplatedNotification } from "../notifications/client";
 import type {
   SendTelegramJob,
   SendEmailDigestJob,
@@ -10,7 +10,6 @@ import type {
 } from "@ojp/queue";
 import axios from "axios";
 
-const resend = new Resend(process.env.RESEND_API_KEY);
 
 export const dispatchWorker = new Worker(
   "dispatch",
@@ -108,68 +107,41 @@ async function handleEmailDigest(data: SendEmailDigestJob) {
 
   if (matches.length === 0) return;
 
-  const matchRows = matches
-    .map(
-      (m) =>
-        `<tr>
-          <td style="padding:8px;border-bottom:1px solid #f0f0f0;">
-            <strong>${m.jobListing.jobTitle}</strong><br>
-            <span style="color:#6b7280;font-size:12px;">${m.jobListing.companyName}</span>
-          </td>
-          <td style="padding:8px;border-bottom:1px solid #f0f0f0;text-align:center;">
-            ${Math.round(m.similarityScore * 100)}%
-          </td>
-          <td style="padding:8px;border-bottom:1px solid #f0f0f0;">
-            <a href="${m.jobListing.applyUrl}" style="color:#3b82f6;">View →</a>
-          </td>
-        </tr>`
-    )
-    .join("");
-
-  const html = `
-    <div style="font-family:sans-serif;max-width:600px;margin:0 auto;padding:32px;">
-      <h2 style="color:#1d4ed8;">
-        ${matches.length} New Job Match${matches.length > 1 ? "es" : ""}
-      </h2>
-      <p style="color:#6b7280;">
-        ${
-          data.digestType === "instant"
-            ? "A new match was just found"
-            : `Your ${data.digestType} digest`
-        }
-      </p>
-      <table style="width:100%;border-collapse:collapse;margin-top:16px;">
-        <thead>
-          <tr style="background:#f9fafb;">
-            <th style="padding:8px;text-align:left;">Role</th>
-            <th style="padding:8px;">Match</th>
-            <th style="padding:8px;">Link</th>
-          </tr>
-        </thead>
-        <tbody>${matchRows}</tbody>
-      </table>
-      <a href="${process.env.APP_URL}/kanban"
-         style="display:inline-block;margin-top:24px;background:#3b82f6;color:#fff;
-                padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:600;">
-        Open Job Board →
-      </a>
-    </div>
-  `;
-
-  await resend.emails.send({
-    from: process.env.RESEND_FROM_EMAIL!,
-    to: user.email,
-    subject: `${matches.length} new job match${matches.length > 1 ? "es" : ""} on OpenJobPulse`,
-    html,
+  // Notification Service owns templates and delivery. We only submit safe,
+  // structured text so a job description cannot inject markup into an email.
+  const jobLines = matches.map((m, i) => {
+    const title = m.jobListing.jobTitle.replace(/[\\r\\n]+/g, " ").slice(0, 160);
+    const company = m.jobListing.companyName.replace(/[\\r\\n]+/g, " ").slice(0, 160);
+    const url = m.jobListing.applyUrl;
+    return `${i + 1}. ${title} at ${company} (${Math.round(m.similarityScore * 100)}% match) — ${url}`;
+  });
+  const notification = await sendTemplatedNotification({
+    recipient: user.email,
+    templateId: process.env.NOTIFICATION_SERVICE_JOB_DIGEST_TEMPLATE ?? "openjobpulse-job-digest",
+    payloadData: {
+      name: user.email.split("@")[0],
+      matchCount: matches.length,
+      digestType: data.digestType,
+      jobs: jobLines.join("\\n"),
+      dashboardUrl: `${(process.env.APP_URL ?? process.env.NEXTAUTH_URL ?? "").replace(/\\/$/, "")}/kanban`,
+    },
+    idempotencyKey: `openjobpulse:digest:${data.userId}:${data.digestType}:${matches.map((m) => m.id).sort().join(",")}`,
   });
 
+  // 202/queued means accepted for asynchronous processing, NOT delivered.
   await db.notificationLog.create({
     data: {
       userId: data.userId,
       channel: "email",
       destination: user.email,
-      payloadSnapshot: { matchCount: matches.length, digestType: data.digestType },
-      delivered: true,
+      payloadSnapshot: {
+        matchCount: matches.length,
+        digestType: data.digestType,
+        provider: "notification-service",
+        notificationId: notification.notificationId,
+        acceptedStatus: notification.status,
+      },
+      delivered: false,
     },
   });
 }
