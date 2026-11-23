@@ -3,7 +3,6 @@ import { z } from "zod";
 import { hash } from "argon2";
 import crypto from "crypto";
 import { db } from "@ojp/db";
-import { stripe } from "@/lib/stripe";
 
 const RegisterSchema = z.object({
   fullName: z.string().min(2).max(100),
@@ -56,26 +55,10 @@ export async function POST(req: NextRequest) {
     parallelism: 4,
   });
 
-  // ── 4. Create user + profile + Stripe customer + subscription in one tx ──
+  // ── 4. Provision the free account atomically ───────────────────────────
+  // Email signup must not depend on Stripe or paid service configuration.
+  // Subscription records remain optional for accounts created with billing.
   try {
-    // Create Stripe customer first (outside tx — external call)
-    const stripeCustomer = await stripe.customers.create({
-      email,
-      name: fullName,
-      metadata: { source: "openjobpulse" },
-    });
-
-    // Start Stripe trial subscription
-    const stripeSubscription = await stripe.subscriptions.create({
-      customer: stripeCustomer.id,
-      items: [{ price: process.env.STRIPE_PRICE_MONTHLY! }],
-      trial_period_days: 7,
-      payment_behavior: "default_incomplete",
-      expand: ["latest_invoice.payment_intent"],
-    });
-
-    const trialEnd = new Date(stripeSubscription.trial_end! * 1000);
-
     // DB transaction
     const user = await db.$transaction(async (tx) => {
       // Create user
@@ -97,19 +80,6 @@ export async function POST(req: NextRequest) {
         },
       });
 
-      // Create subscription record
-      await tx.subscription.create({
-        data: {
-          userId: newUser.id,
-          stripeCustomerId: stripeCustomer.id,
-          stripeSubscriptionId: stripeSubscription.id,
-          status: "TRIALING",
-          trialEnd,
-          currentPeriodStart: new Date(),
-          currentPeriodEnd: trialEnd,
-        },
-      });
-
       // Record trial credit grant
       await tx.creditTransaction.create({
         data: {
@@ -117,7 +87,7 @@ export async function POST(req: NextRequest) {
           type: "TRIAL_GRANT",
           amount: 50,
           balance: 50,
-          description: "7-day trial credit grant",
+          description: "Free account starter credit grant",
         },
       });
 

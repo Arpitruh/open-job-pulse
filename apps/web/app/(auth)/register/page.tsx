@@ -82,10 +82,10 @@ export default function RegisterPage() {
         </div>
 
         <h1 className="text-2xl font-bold text-gray-900 mb-1">
-          Start your free trial
+          Create your free account
         </h1>
         <p className="text-gray-500 text-sm mb-6">
-          7 days full access · No credit card required
+          Get started with 50 credits · No payment required
         </p>
 
         {/* LinkedIn OAuth */}

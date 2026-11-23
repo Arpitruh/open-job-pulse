@@ -50,7 +50,7 @@ export default async function DashboardLayout({
             email: session.user.email,
           }}
           subscription={{
-            status: subscription?.status ?? "TRIALING",
+            status: subscription?.status ?? "FREE",
             planName: subscription?.plan?.name ?? null,
             trialDaysLeft,
           }}
