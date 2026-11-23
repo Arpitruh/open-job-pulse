@@ -20,7 +20,11 @@ function StatusIcon({ status, fails }: { status: string | null; fails: number })
   return <Clock className="w-4 h-4 text-gray-400" />;
 }
 
-export default function ScraperHealth({ scrapers }: { scrapers: Scraper[] }) {
+export default function ScraperHealth({ scrapers, workerHeartbeat, redisConnected }: {
+  scrapers: Scraper[];
+  workerHeartbeat: string | null;
+  redisConnected: boolean;
+}) {
   const router = useRouter();
   const [togglingId, setTogglingId] = useState<string | null>(null);
   const [triggeringId, setTriggeringId] = useState<string | null>(null);
@@ -46,11 +50,26 @@ export default function ScraperHealth({ scrapers }: { scrapers: Scraper[] }) {
     finally { setTriggeringId(null); }
   }
 
+  const heartbeatDate = workerHeartbeat ? new Date(workerHeartbeat) : null;
+  const heartbeatValid = !!heartbeatDate && !Number.isNaN(heartbeatDate.getTime()) &&
+    Date.now() - heartbeatDate.getTime() < 90_000;
+
   return (
     <div className="max-w-6xl mx-auto space-y-5">
       <div>
         <h1 className="text-xl font-bold text-gray-900">Scraper Health</h1>
         <p className="text-sm text-gray-500 mt-0.5">{scrapers.length} scrapers · {scrapers.filter(s => s.consecutiveFails >= 3).length} failing</p>
+      </div>
+      <div className="rounded-xl border border-gray-200 bg-white p-4">
+        <h2 className="font-semibold text-gray-900 text-sm">Background worker readiness</h2>
+        <p className="mt-1 text-sm text-gray-700">
+          Redis: {redisConnected ? "Connected" : "Unavailable"} · Worker: {heartbeatValid ? "Heartbeat active" : "No recent heartbeat"}
+        </p>
+        <p className="mt-1 text-xs text-gray-500">
+          {heartbeatDate && !Number.isNaN(heartbeatDate.getTime())
+            ? `Last worker heartbeat: ${formatDistanceToNow(heartbeatDate, { addSuffix: true })}`
+            : "No worker heartbeat recorded. The worker may be offline, misconfigured, or not yet deployed."}
+        </p>
       </div>
       <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
         <table className="w-full text-sm">
