@@ -3,6 +3,7 @@ import { z } from "zod";
 import { hash } from "argon2";
 import crypto from "crypto";
 import { db } from "@ojp/db";
+import { isNotificationServiceConfigured, sendRegistrationWelcomeEvent } from "@/lib/notification-service";
 
 const RegisterSchema = z.object({
   fullName: z.string().min(2).max(100),
@@ -110,11 +111,21 @@ export async function POST(req: NextRequest) {
       return newUser;
     });
 
+    // Welcome email is optional. Its failure must never roll back registration.
+    // Notification Service decides whether this application's welcome template is enabled.
+    if (isNotificationServiceConfigured()) {
+      try {
+        await sendRegistrationWelcomeEvent(user.id, user.email, fullName);
+      } catch (error) {
+        console.error("[Register] Welcome notification was not accepted:", error);
+      }
+    }
+
     return NextResponse.json(
       {
         success: true,
         userId: user.id,
-        nextStep: "/onboarding/verify-phone",
+        nextStep: "/dashboard",
       },
       { status: 201 }
     );
