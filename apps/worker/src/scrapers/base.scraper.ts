@@ -140,6 +140,7 @@ export abstract class BaseScraper {
     ingested: number;
     skipped: number;
     errors: number;
+    listingIds: string[];
   }> {
     // Check robots.txt
     await checkRobots(this.config.sourceUrl);
@@ -149,6 +150,7 @@ export abstract class BaseScraper {
     let ingested = 0;
     let skipped = 0;
     let errors = 0;
+    const listingIds: string[] = [];
 
     const listings = await this.fetch();
     console.log(`[${this.sourcePortal}] Fetched ${listings.length} raw listings`);
@@ -173,7 +175,7 @@ export abstract class BaseScraper {
         }
 
         // Store listing
-        await db.jobListing.create({
+        const created = await db.jobListing.create({
           data: {
             contentHash,
             companyName: raw.companyName,
@@ -190,6 +192,7 @@ export abstract class BaseScraper {
           },
         });
 
+        listingIds.push(created.id);
         ingested++;
 
         // Rate limiting
@@ -205,6 +208,6 @@ export abstract class BaseScraper {
       `[${this.sourcePortal}] Done: ${ingested} ingested, ${skipped} skipped, ${errors} errors`
     );
 
-    return { ingested, skipped, errors };
+    return { ingested, skipped, errors, listingIds };
   }
 }
