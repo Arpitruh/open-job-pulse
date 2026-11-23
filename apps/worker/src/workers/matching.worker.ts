@@ -114,7 +114,7 @@ export const matchingWorker = new Worker(
         matchesTargetTitles(listing.jobTitle, profile.targetTitles);
 
       // Soft filter — don't skip, but apply score penalty for non-matching titles
-      const titleBoost = titleMatches ? 0.2 : -0.1;
+      const titleBoost = profile.targetTitles.length === 0 ? 0 : titleMatches ? 0.2 : -0.1;
       // ── Stage 2: Vector similarity ────────────────────────────────────
       // Prisma's unmapped fields use quoted camelCase SQL column names.
       // Missing vectors fall back to transparent keyword overlap rather than
