@@ -24,14 +24,6 @@ export async function proxy(req: NextRequest) {
     if (!token) {
       return NextResponse.redirect(new URL("/login", req.url));
     }
-    if (
-      !token.identityLockedAt &&
-      !pathname.startsWith("/onboarding")
-    ) {
-      return NextResponse.redirect(
-        new URL("/onboarding/verify-phone", req.url)
-      );
-    }
     return NextResponse.next();
   }
 
