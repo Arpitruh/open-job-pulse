@@ -12,7 +12,6 @@ export default async function DashboardLayout({
 }) {
   const session = await getServerSession(authOptions);
   if (!session?.user?.id) redirect("/login");
-  if (!session.user.identityLockedAt) redirect("/onboarding/verify-phone");
 
   // Fetch subscription + credit balance for header
   const [subscription, profile] = await Promise.all([
