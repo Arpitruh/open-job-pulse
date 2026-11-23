@@ -82,24 +82,15 @@ export const matchingWorker = new Worker(
 
     if (!listing || listing.isFlagged) return;
 
-    // Fetch all active users with profiles
+    // Include free accounts with no subscription record. Existing paid users
+    // remain eligible only while their subscription is active or trialing.
     const users = await db.userProfile.findMany({
       where: {
         user: {
-          subscription: {
-            status: { in: ["TRIALING", "ACTIVE"] },
-          },
-          identityLockedAt: { not: null },
-        },
-      },
-      include: {
-        user: {
-          select: {
-            id: true,
-            subscription: {
-              select: { status: true },
-            },
-          },
+          OR: [
+            { subscription: null },
+            { subscription: { status: { in: ["TRIALING", "ACTIVE"] } } },
+          ],
         },
       },
     });
@@ -116,6 +107,8 @@ export const matchingWorker = new Worker(
       // ── Stage 1: Hard filters ──────────────────────────────────────────
       const { passes, penalised } = passesHardFilters(listing, profile);
 
+      if (!passes) continue;
+
       // ── Stage 1b: Title matching ───────────────────────────────────────
       const { matches: titleMatches, matched: matchedTitles } =
         matchesTargetTitles(listing.jobTitle, profile.targetTitles);
@@ -123,64 +116,49 @@ export const matchingWorker = new Worker(
       // Soft filter — don't skip, but apply score penalty for non-matching titles
       const titleBoost = titleMatches ? 0.2 : -0.1;
       // ── Stage 2: Vector similarity ────────────────────────────────────
-      // Use pgvector cosine similarity
-      // Only run if listing has a vector
-      let similarityScore = 0.5; // Default if no vectors yet
+      // Prisma's unmapped fields use quoted camelCase SQL column names.
+      // Missing vectors fall back to transparent keyword overlap rather than
+      // claiming an arbitrary 50% semantic similarity.
       const scoreBreakdown: { matched: string[]; penalised: string[] } = {
-        matched: matchedTitles,
+        matched: [...matchedTitles],
         penalised,
       };
-
+      let semanticScore: number | null = null;
       try {
-        if (profile.embeddingEngine === "LOCAL_MINILM") {
-          const result = await db.$queryRaw<Array<{ similarity: number }>>`
-            SELECT 1 - (
-              lp.profile_vector_384 <=> jl.listing_vector_384
-            ) AS similarity
-            FROM user_profiles lp, job_listings jl
-            WHERE lp.user_id = ${profile.userId}
-              AND jl.id = ${jobListingId}
-              AND lp.profile_vector_384 IS NOT NULL
-              AND jl.listing_vector_384 IS NOT NULL
-          `;
-          if (result[0]) {
-            similarityScore = Math.max(0, Math.min(1, result[0].similarity));
-          }
-        } else {
-          const result = await db.$queryRaw<Array<{ similarity: number }>>`
-            SELECT 1 - (
-              lp.profile_vector_1536 <=> jl.listing_vector_1536
-            ) AS similarity
-            FROM user_profiles lp, job_listings jl
-            WHERE lp.user_id = ${profile.userId}
-              AND jl.id = ${jobListingId}
-              AND lp.profile_vector_1536 IS NOT NULL
-              AND jl.listing_vector_1536 IS NOT NULL
-          `;
-          if (result[0]) {
-            similarityScore = Math.max(
-              0,
-              Math.min(1, similarityScore + titleBoost),
-            );
-
-            // Skip only if score is very low after penalty
-            if (similarityScore < 0.15) continue;
-          }
-        }
-      } catch {
-        // Vectors not yet generated — use keyword-based fallback score
-        const descLower = listing.descriptionRaw.toLowerCase();
-        const skillMatches = (profile.parsedSkills ?? []).filter((skill) =>
-          descLower.includes(skill.toLowerCase()),
-        );
-        scoreBreakdown.matched.push(...skillMatches);
-        similarityScore = Math.min(
-          1,
-          0.3 +
-            (skillMatches.length / Math.max(1, profile.parsedSkills.length)) *
-              0.7,
-        );
+        const rows = profile.embeddingEngine === "LOCAL_MINILM"
+          ? await db.$queryRaw<Array<{ similarity: number | null }>>`
+              SELECT 1 - (p."profileVector384" <=> j."listingVector384") AS similarity
+              FROM user_profiles p CROSS JOIN job_listings j
+              WHERE p."userId" = ${profile.userId} AND j.id = ${jobListingId}
+                AND p."profileVector384" IS NOT NULL
+                AND j."listingVector384" IS NOT NULL
+            `
+          : await db.$queryRaw<Array<{ similarity: number | null }>>`
+              SELECT 1 - (p."profileVector1536" <=> j."listingVector1536") AS similarity
+              FROM user_profiles p CROSS JOIN job_listings j
+              WHERE p."userId" = ${profile.userId} AND j.id = ${jobListingId}
+                AND p."profileVector1536" IS NOT NULL
+                AND j."listingVector1536" IS NOT NULL
+            `;
+        if (rows[0]?.similarity != null) semanticScore = Number(rows[0].similarity);
+      } catch (error) {
+        console.warn(`[Matching] Vector lookup unavailable for ${profile.userId}:`, error);
       }
+
+      let similarityScore: number;
+      if (semanticScore === null || !Number.isFinite(semanticScore)) {
+        const text = `${listing.jobTitle} ${listing.descriptionRaw}`.toLowerCase();
+        const skills = profile.parsedSkills ?? [];
+        const matchedSkills = skills.filter((skill) => text.includes(skill.toLowerCase()));
+        scoreBreakdown.matched.push(...matchedSkills);
+        // With no vectors and no skills, do not invent a confident match.
+        if (!skills.length && !matchedTitles.length) continue;
+        similarityScore = skills.length ? matchedSkills.length / skills.length : 0;
+      } else {
+        similarityScore = semanticScore;
+      }
+      similarityScore = Math.max(0, Math.min(1, similarityScore + titleBoost));
+      if (similarityScore < 0.15) continue;
 
       // ── Create match record ────────────────────────────────────────────
       // Get workspace
