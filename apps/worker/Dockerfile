@@ -21,7 +21,7 @@ COPY packages/embeddings/package.json ./packages/embeddings/
 COPY apps/worker/package.json ./apps/worker/
 
 # Install all workspace dependencies
-RUN npm ci --workspace=apps/worker \
+RUN npm ci --onnxruntime-node-install-cuda=skip --workspace=apps/worker \
            --workspace=packages/db \
            --workspace=packages/queue \
            --workspace=packages/ai \
