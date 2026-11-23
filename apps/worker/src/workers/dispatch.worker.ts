@@ -119,7 +119,7 @@ async function handleEmailDigest(data: SendEmailDigestJob) {
     recipient: user.email,
     templateId: process.env.NOTIFICATION_SERVICE_JOB_DIGEST_TEMPLATE ?? "openjobpulse-job-digest",
     payloadData: {
-      name: user.email.split("@")[0],
+      name: user.email.split("@")[0] ?? "there",
       matchCount: matches.length,
       digestType: data.digestType,
       jobs: jobLines.join("\n"),
