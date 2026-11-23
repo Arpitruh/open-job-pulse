@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@ojp/db";
-import { Resend } from "resend";
+import { isNotificationServiceConfigured, sendPasswordResetEmail } from "@/lib/notification-service";
 import crypto from "crypto";
 
 export async function POST(req: NextRequest) {
@@ -10,7 +10,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Enter a valid email." }, { status: 400 });
   }
   const secret = process.env.PASSWORD_RESET_SECRET || process.env.NEXTAUTH_SECRET;
-  if (!secret || !process.env.RESEND_API_KEY || !process.env.RESEND_FROM_EMAIL) {
+  if (!secret || !isNotificationServiceConfigured()) {
     console.error("Password reset email configuration missing");
     return NextResponse.json({ error: "Password recovery is temporarily unavailable." }, { status: 503 });
   }
@@ -24,17 +24,17 @@ export async function POST(req: NextRequest) {
     const url = new URL("/reset-password", origin);
     url.searchParams.set("token", payload + "." + signature);
     try {
-      const resend = new Resend(process.env.RESEND_API_KEY);
-      const result = await resend.emails.send({
-        from: process.env.RESEND_FROM_EMAIL,
-        to: user.email,
-        subject: "Reset your Open Job Pulse password",
-        text: "Reset your password using this link (expires in 15 minutes): " + url.toString() + "\nIf you did not request this, ignore this email.",
-      });
-      if (result.error) throw new Error(result.error.message);
+      // The Notification Service owns the email template and delivery retries.
+      // A new signed token produces a new key; a retry of this request is safe.
+      await sendPasswordResetEmail(
+        user.email,
+        url.toString(),
+        "password-reset:" + crypto.createHash("sha256").update(payload).digest("hex")
+      );
     } catch (error) {
-      console.error("Password reset email delivery failed", error);
-      return NextResponse.json({ error: "Unable to send reset email right now." }, { status: 503 });
+      console.error("[Password reset] Notification Service unavailable:", error);
+      // Preserve account enumeration resistance even when delivery fails.
+      // Operations alerts must surface this failure to the application owner.
     }
   }
   return NextResponse.json(generic);
