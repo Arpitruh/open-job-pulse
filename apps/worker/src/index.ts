@@ -1,7 +1,7 @@
-import "./workers/ingestion.worker";
-import "./workers/matching.worker";
-import "./workers/dispatch.worker";
-import "./workers/ai.worker";
+import { ingestionWorker } from "./workers/ingestion.worker";
+import { matchingWorker } from "./workers/matching.worker";
+import { dispatchWorker } from "./workers/dispatch.worker";
+import { aiWorker } from "./workers/ai.worker";
 import "./workers/scheduler.worker";
 import "./email/digest";
 import { bot } from "./telegram/bot";
@@ -60,10 +60,13 @@ async function shutdown() {
   if (telegramStarted) bot.stop("SIGTERM");
   // Stop accepting jobs before closing the shared Redis/Prisma connections.
   const results = await Promise.allSettled([
+    ingestionWorker.close(), matchingWorker.close(), dispatchWorker.close(), aiWorker.close(),
+  ]);
+  const queueResults = await Promise.allSettled([
     ingestionQueue.close(), matchingQueue.close(), dispatchQueue.close(),
     aiQueue.close(), schedulerQueue.close(), db.$disconnect(),
   ]);
-  for (const result of results) {
+  for (const result of [...results, ...queueResults]) {
     if (result.status === "rejected") console.error("[Worker] Shutdown error:", result.reason);
   }
   try { await redisConnection.del(HEARTBEAT_KEY); } catch {}
