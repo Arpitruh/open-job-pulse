@@ -60,8 +60,42 @@ and retries. OpenJobPulse's BullMQ worker retries submission failures.
   `delivered: false`. It is **not** proof of email delivery.
 - No fallback to Resend is used for digests; provider configuration errors
   should surface rather than silently selecting a paid transport.
-- Only email digests are migrated in this change. Telegram and existing
-  app-specific webhooks remain unchanged. Welcome, password reset and other
+- Email digests, welcome events and password resets use Notification Service.
+  Telegram and existing app-specific webhooks remain unchanged. Other
   transactional emails require separately defined templates and integration.
 - The worker needs to be hosted continuously; Vercel's web deployment does
   not run these BullMQ consumers.
+
+## Account emails (separate rollout)
+
+Account registration calls `POST /api/v1/notifications/events/user.registered`
+after the database transaction commits. For this to send, configure the
+`openjobpulse` application in Notification Service: a published welcome
+template, `dashboardUrl`, and `welcomeEnabled`. Failures are logged but do
+not prevent users from signing up.
+
+Password recovery calls `POST /api/v1/notifications/send` with the
+`openjobpulse-password-reset` template and the variables `resetUrl` and
+`expiryMinutes`. Suggested template:
+
+```html
+<h2>Reset your OpenJobPulse password</h2>
+<p>Use this link within {{expiryMinutes}} minutes:</p>
+<p><a href="{{resetUrl}}">Reset password</a></p>
+<p>If you did not request this, you can ignore this message.</p>
+```
+
+Required variables: `resetUrl`, `expiryMinutes`.
+Suggested subject: `Reset your OpenJobPulse password`.
+Publish the template in the OpenJobPulse application. The token remains
+HMAC signed and single-use (invalidated by password-hash change).
+
+The **Vercel web app** needs the same server-only
+`NOTIFICATION_SERVICE_URL` and `NOTIFICATION_SERVICE_API_KEY` as the worker.
+Set `NOTIFICATION_SERVICE_PASSWORD_RESET_TEMPLATE` only when using a
+different template slug.
+
+**Do not deploy the account-email switch until the application credential and
+password-reset template are configured and a test reset is received.** The
+account-email PR deliberately stays separate from the already merged digest
+integration, so the existing reset flow can remain available during rollout.
