@@ -37,3 +37,5 @@ jobs:
         run: npm run build --workspace=@ojp/web
       - name: Type-check background worker
         run: npm run type-check --workspace=@ojp/worker
+      - name: Build background worker
+        run: npm run build --workspace=@ojp/worker
