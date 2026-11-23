@@ -12,7 +12,8 @@ export async function checkSubscriptionAccess(
     select: { status: true, trialEnd: true },
   });
 
-  if (!sub) return { allowed: false, reason: "no_subscription" };
+  // Accounts without billing records use the free tier. AI operations remain credit-limited.
+  if (!sub) return { allowed: true };
 
   if (sub.status === "ACTIVE" || sub.status === "TRIALING") {
     // Extra guard: if trialing, check trial hasn't expired
