@@ -1,6 +1,8 @@
 import cron, { type ScheduledTask } from "node-cron";
 import { ingestionQueue, aiQueue } from "@ojp/queue";
-import { // Keep exactly one cron task per scraper. Refreshes reconcile schedules rather
+import { db } from "@ojp/db";
+
+// Keep exactly one cron task per scraper. Refreshes reconcile schedules rather
 // than registering another copy of every task on each hourly reload.
 const scraperTasks = new Map<string, { schedule: string; task: ScheduledTask }>();
 
@@ -44,10 +46,6 @@ async function scheduleScrapers() {
     });
     scraperTasks.set(scraper.id, { schedule, task });
     console.log(`[Scheduler] ${scraper.label} scheduled: ${schedule}`);
-  }
-}
-
-schedule}`);
   }
 }
 
