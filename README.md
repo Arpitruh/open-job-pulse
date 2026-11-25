@@ -2,12 +2,7 @@
 
 # 🎯 OpenJobPulse
 
-**AI-powered job search and application management platform.** A full-stack Next.js SaaS project focused on semantic job matching, application tracking and AI-assisted cover letters.
-
-
-**Privacy-First, AI-Powered Job Intelligence & Automation Platform**
-
-Automate your job search with two-stage semantic matching, streaming AI cover letters, and sub-3-second alerts — without exposing your career data to third-party brokers.
+A personal project for job matching, application tracking and AI-assisted cover letters.
 
 [![Next.js](https://img.shields.io/badge/Next.js-16-black?style=for-the-badge&logo=next.js)](https://nextjs.org/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.5-3178C6?style=for-the-badge&logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
@@ -21,17 +16,9 @@ Automate your job search with two-stage semantic matching, streaming AI cover le
 
 ---
 
-## 🚀 Why OpenJobPulse?
+## Why I built it
 
-Engineers spend **8–15 hours a week** refreshing the same job boards, reading mismatched descriptions, and rewriting boilerplate cover letters. Worse, commercial job platforms monetize your job-seeking signals and sell your resume data to staffing agencies.
-
-**OpenJobPulse** replaces manual job triage with a self-hostable, high-throughput automation pipeline:
-- **Zero-Cost Local Embeddings:** Generates 384-dimension vector embeddings locally inside the worker container via ONNX Runtime (`all-MiniLM-L6-v2`). Your resume never has to leave your server.
-- **Sub-80ms Semantic Triage:** Combines deterministic hard filters with `pgvector` HNSW cosine similarity to match 10,000+ listings against 500+ candidate profiles in milliseconds.
-- **Sub-3-Second Dispatch:** Pushes matched listings straight to Telegram (with interactive inline action buttons), Email, or Webhooks the moment they go live.
-- **BYOK AI Suite:** Stream tailored cover letters, rewrite resume bullets for ATS compatibility, and analyze cross-market skill gaps using your own OpenAI or Anthropic API key.
-
----
+I wanted to spend less time checking job boards and sorting through unrelated listings. OpenJobPulse is an experiment in collecting job listings, matching them against a profile and keeping track of applications. It also has AI-assisted writing tools. Matching speed and alert latency depend on the deployment; the project is not a guarantee of any particular performance.
 
 ## ✨ Features
 
