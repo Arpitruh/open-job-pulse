@@ -2,6 +2,9 @@
 
 # 🎯 OpenJobPulse
 
+**AI-powered job search and application management platform.** A full-stack Next.js SaaS project focused on semantic job matching, application tracking and AI-assisted cover letters.
+
+
 **Privacy-First, AI-Powered Job Intelligence & Automation Platform**
 
 Automate your job search with two-stage semantic matching, streaming AI cover letters, and sub-3-second alerts — without exposing your career data to third-party brokers.
